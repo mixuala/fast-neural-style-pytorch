@@ -1,3 +1,7 @@
+import tensorflow as tf
+import numpy as np
+
+
 class ReflectionPadding2D(tf.keras.layers.Layer):
   """
   usage: 

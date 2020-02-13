@@ -1,4 +1,7 @@
 
+import tensorflow as tf
+import numpy as np
+
 # Gram Matrix
 def gram(tensor):
   """
