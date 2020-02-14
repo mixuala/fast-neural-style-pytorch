@@ -3,29 +3,37 @@ import numpy as np
 
 import utils
 
-layers = { 
-  # "vgg16" : {}, 
-  "vgg19" : {},
-  "vgg19_torch" : {},
-}
+def get_layers(model="vgg19"):
+  layers = { 
+    "vgg16_torch" : {}, 
+    "vgg19" : {},
+    "vgg19_torch" : {},
+  }
+  # Content layer where will pull our feature maps
+  layers["vgg16_torch"]['content_layers'] = ['block2_conv2'] 
+  layers["vgg16_torch"]['style_layers'] = ['block1_conv2',
+                  'block2_conv2',
+                  'block3_conv3', 
+                  'block4_conv3']
 
-# Content layer where will pull our feature maps
-layers["vgg19"]['content_layers'] = ['block5_conv2'] 
-layers["vgg19"]['style_layers'] = ['block1_conv1',
-                'block2_conv1',
-                'block3_conv1', 
-                'block4_conv1', 
-                'block5_conv1']
+  # Content layer where will pull our feature maps
+  layers["vgg19"]['content_layers'] = ['block_conv2'] 
+  layers["vgg19"]['style_layers'] = ['block1_conv1',
+                  'block2_conv1',
+                  'block3_conv1', 
+                  'block4_conv1', 
+                  'block5_conv1']
 
-# mapped from layers used by pytorch: https://github.com/rrmina/fast-neural-style-pytorch
-layers["vgg19_torch"]['content_layers'] = ['block2_conv2']
-layers["vgg19_torch"]['style_layers'] = ['block1_conv2',
-              'block2_conv2',
-              'block3_conv4', 
-              'block4_conv2', 
-              'block4_conv4',
-              'block5_conv4',
-              ]
+  # mapped from layers used by pytorch: https://github.com/rrmina/fast-neural-style-pytorch
+  layers["vgg19_torch"]['content_layers'] = ['block2_conv2']
+  layers["vgg19_torch"]['style_layers'] = ['block1_conv2',
+                'block2_conv2',
+                'block3_conv4', 
+                'block4_conv2', 
+                'block4_conv4',
+                'block5_conv4',
+                ]
+  return layers[model]
 
 
 def vgg_layers0(content_layers, style_layers):
@@ -34,7 +42,7 @@ def vgg_layers0(content_layers, style_layers):
   Returns: tuple of lists, (content_features, style_features)
 
   usage:
-    (content_features, style_features) = vgg_layers(content_layers, style_layers)(x_train)
+    (content_features, style_features) = vgg_layers0(content_layers, style_layers)(x_train)
   """
   vgg = tf.keras.applications.VGG19(include_top=False, weights='imagenet')
   vgg.trainable = False
