@@ -226,15 +226,11 @@ class TransformerNetworkTanh(TransformerNetwork):
 
 
 
-# check = TransformerNetworkFlat(name="transformer")
-check = TransformerNetworkTanh(name="transformer_tanh")
-check.build(input_shape=(4,255,255,3))
-check.summary()
-print("***\n")
-tf.keras.utils.plot_model(check, 'transformer.png', expand_nested=True, show_shapes=True)
-
-
-
+# check = TransformerNetwork(name="transformer")
+# check.build(input_shape=(None,255,255,3))
+# check.summary()
+# print("***\n")
+# tf.keras.utils.plot_model(check, 'transformer.png', expand_nested=True, show_shapes=True)
 
 
 
@@ -287,8 +283,3 @@ def getTransformerNetworkFn(shape=tuple, norm="instance", **kwargs):
   x = tf.nn.relu(x)
   x = _layers.deconv3(x)
   return tf.keras.Model(input_tensor, x)
-
-
-check = getTransformerNetworkFn(shape=(255,255,3))
-check.summary()
-tf.keras.utils.plot_model(check, 'transformer_fn_api.png', expand_nested=True, show_shapes=True)

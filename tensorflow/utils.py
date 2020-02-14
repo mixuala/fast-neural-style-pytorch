@@ -1,6 +1,7 @@
 
 import tensorflow as tf
 import numpy as np
+import PIL.Image
 
 # Gram Matrix
 def gram(tensor):
@@ -55,6 +56,27 @@ def vgg_input_preprocess(image, max_dim=512, **kvargs):
   output = tf.keras.applications.vgg19.preprocess_input(x*255.0)/255.0
   return output
 
+def sq_center_crop(filename, size=256, normalize=True):
+  """
+  return the largest square center crop from image, resized to (size,size)
+  
+  Returns:
+    image tensor of domain=(0.,1.) if normalize==True else domain(0,255)
+  """
+  import torchvision
+  parts = tf.strings.split(filename, '/')
+  label = parts[-2]
+  pil_image = tf.keras.preprocessing.image.load_img(filename)
+  pil_image = torchvision.transforms.Resize(size)(pil_image)
+  pil_image = torchvision.transforms.CenterCrop(size)(pil_image)
+  # torch_tensor = np_array( torchvision.transforms.ToTensor()(pil_image) ) # CHANNELS_FIRST
+  if normalize:
+    image = tf.keras.preprocessing.image.img_to_array(pil_image, dtype=float)  # 255. CHANNELS_LAST
+    image = tf.convert_to_tensor(image/255., dtype=tf.float32)
+  else:
+    image = tf.keras.preprocessing.image.img_to_array(pil_image, dtype=int)  # 255 CHANNELS_LAST
+    image = tf.convert_to_tensor(image, dtype=tf.uint8)
+  return image, label
 
 def random_sq_crop(image, size=256, margin_pct=5):
   """
@@ -78,3 +100,7 @@ def random_sq_crop(image, size=256, margin_pct=5):
   image = tf.image.crop_to_bounding_box( image, y, x, crop_size, crop_size)
   image = tf.image.resize(image, (size,size) )
   return image
+
+# dataset helpers
+def dataset_size(dataset):
+  return dataset.reduce(0, lambda x, _: x + 1).numpy()
