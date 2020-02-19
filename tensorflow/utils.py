@@ -114,12 +114,12 @@ def torch_transforms(filename):
   import torchvision
   parts = tf.strings.split(filename, '/')
   label = parts[-2]
-  print(tf.is_tensor(filename), )
-  if tf.executing_eagerly():
-    filename = filename.numpy().decode()
-  elif isinstance( filename, tf.Tensor):
-    # Dataset.map(), does not execute eagerly
-    assert False, "error: cannot convert Tensor dtype=string to python string"
+  if tf.is_tensor(filename):
+    if tf.executing_eagerly():
+      filename = filename.numpy().decode()
+    else:
+      # Dataset.map(), does not execute eagerly
+      assert False, "error: cannot convert Tensor dtype=string to python string"
     
   pil_image = tf.keras.preprocessing.image.load_img(filename)
   pil_image = torchvision.transforms.Resize(TRAIN_IMAGE_SIZE)(pil_image)
