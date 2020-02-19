@@ -17,7 +17,7 @@ def get_layers(model="vgg19"):
                   'block4_conv3']
 
   # Content layer where will pull our feature maps
-  layers["vgg19"]['content_layers'] = ['block_conv2'] 
+  layers["vgg19"]['content_layers'] = ['block5_conv2'] 
   layers["vgg19"]['style_layers'] = ['block1_conv1',
                   'block2_conv1',
                   'block3_conv1', 
