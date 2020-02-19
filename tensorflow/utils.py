@@ -104,3 +104,52 @@ def random_sq_crop(image, size=256, margin_pct=5):
 # dataset helpers
 def dataset_size(dataset):
   return dataset.reduce(0, lambda x, _: x + 1).numpy()
+
+
+def torch_transforms(filename):
+  """
+  same as pytorch implementation, but returns CHANNELS_LAST tf.tensor()
+  WARN: doesn't work with Dataset.map()  
+  """
+  import torchvision
+  parts = tf.strings.split(filename, '/')
+  label = parts[-2]
+  print(tf.is_tensor(filename), )
+  if tf.executing_eagerly():
+    filename = filename.numpy().decode()
+  elif isinstance( filename, tf.Tensor):
+    # Dataset.map(), does not execute eagerly
+    assert False, "error: cannot convert Tensor dtype=string to python string"
+    
+  pil_image = tf.keras.preprocessing.image.load_img(filename)
+  pil_image = torchvision.transforms.Resize(TRAIN_IMAGE_SIZE)(pil_image)
+  pil_image = torchvision.transforms.CenterCrop(TRAIN_IMAGE_SIZE)(pil_image)
+  image = np.array( torchvision.transforms.ToTensor()(pil_image) ) # CHANNELS_FIRST
+  image = tf.transpose(image, perm=[1,2,0]) # normalized, CHANNELS_LAST
+  # image *= 255. # 255, CHANNELS_LAST 
+  return image, label
+
+def batch_torch_transforms(list_ds, batch_size=4):
+  """
+  transform a Dataset list of image filenames in to a batch of resized images, labels
+  uses torchvision.transforms.Resize() to crop largest square before resize
+
+  WARNING: does NOT lazy load
+
+  Args:
+    list_ds: tf.data.Dataset.list_files('{}/*/*'.format(DATASET_PATH))
+
+  usage:
+    for x_train, y_true in batch_torch_transforms(list_ds, BATCH_SIZE):
+
+  """
+  for filenames in list_ds.batch(batch_size):
+    images = []
+    labels = []
+    for i, filename in enumerate(filenames):
+      image, label = torch_transforms(filename)
+      images += [image]
+      labels += [label]
+    images = tf.stack(images, axis=0)
+    labels = tf.stack(labels, axis=0)
+    return images, labels # x_train, y_true

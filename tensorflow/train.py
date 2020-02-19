@@ -5,10 +5,6 @@ import os
 import random
 import numpy as np
 import time
-import vgg
-import transformer
-import utils
-
 
 import vgg
 import transformer
@@ -35,6 +31,7 @@ SAVE_IMAGE_PATH = "/content/"
 # SAVE_MODEL_EVERY = 500 # 2,000 Images with batch size 4
 SAVE_MODEL_EVERY = 10 # 2,000 Images with batch size 4
 SEED = 35
+PLOT_LOSS = 1
 
 # # Dataset and Dataloader
 def transforms(filename):
@@ -58,6 +55,19 @@ def torch_transforms(filename):
   # image *= 255. # 255, CHANNELS_LAST 
   return image, label
 
+def tf_transforms(filename):
+  """
+  works with Dataset.map(), but distorts image on resize
+  """
+  parts = tf.strings.split(filename, '/')
+  label = parts[-2]
+  
+  image = tf.io.read_file(filename)
+  image = tf.image.decode_jpeg(image, channels=3) # 255
+  image = tf.image.convert_image_dtype(image, tf.float32)
+  image = tf.image.resize(image, [TRAIN_IMAGE_SIZE, TRAIN_IMAGE_SIZE])
+  return image, label  
+
 
 def train():
   # # Seeds
@@ -71,11 +81,12 @@ def train():
   list_ds = tf.data.Dataset.list_files('{}/*/*'.format(DATASET_PATH))
   NUM_BATCHES = 100
   list_ds = list_ds.take(BATCH_SIZE * NUM_BATCHES)
-  train_dataset = list_ds.map(transforms).shuffle(buffer_size=100).batch(BATCH_SIZE)
+  # train_dataset = list_ds.map(transforms).shuffle(buffer_size=100).batch(BATCH_SIZE)
+  train_dataset = utils.batch_torch_transforms(list_ds.shuffle(buffer_size=100), BATCH_SIZE) # NOT lazy loaded
 
   # # Load networks
   TransformerNetwork = transformer.TransformerNetwork()
-  style_model = vgg.layers["vgg19_torch"]
+  style_model = vgg.get_layers("vgg19_torch")
   VGG = vgg.vgg_layers0( style_model['content_layers'], style_model['style_layers'] )
 
   # # Get Style Features, BGR ordering
@@ -87,12 +98,13 @@ def train():
   style_image = tf.keras.preprocessing.image.img_to_array(style_image, dtype=float)/255.
   style_tensor = tf.repeat( style_image[tf.newaxis,...], repeats=BATCH_SIZE, axis=0)
   # B, H, W, C = style_tensor.shape
-  (_, style_features) = VGG( style_tensor , preprocess=True )
+  # (_, style_features) = VGG( style_tensor , preprocess=True )
+  style_tensor = tf.keras.applications.vgg16.preprocess_input(tf.cast(style_tensor, tf.float32)*255.)/255.
+  (_, style_features) = VGG( style_tensor , preprocess=False )
   target_style_gram = [ utils.gram(value)  for value in style_features ]  # list
 
   # # Optimizer settings
   optimizer = tf.optimizers.Adam(learning_rate=ADAM_LR, beta_1=0.99, epsilon=1e-1)
-  # optimizer = optim.Adam(TransformerNetwork.parameters(), lr=ADAM_LR)
 
   # # Loss trackers
   content_loss_history = []
@@ -110,21 +122,29 @@ def train():
       # content_batch = content_batch[:,[2,1,0]].to(device) # 
       generated_batch = TransformerNetwork(x_train)
       # TODO: clip and/or tanh before VGG()??, what is the domain of generated_batch?
-      (generated_content_features, generated_style_features) = VGG( generated_batch, preprocess=True )
+      generated_batch = tf.add(tf.nn.tanh(generated_batch), rgb_mean_normalized)
+  
+      # (generated_content_features, generated_style_features) = VGG( generated_batch, preprocess=True )
+      generated_batch_BGR_centered = tf.keras.applications.vgg16.preprocess_input(generated_batch*255.)/255.
+      (generated_content_features, generated_style_features) = VGG( generated_batch_BGR_centered, preprocess=False )
+
       generated_style_gram = [ utils.gram(value)  for value in generated_style_features ]  # list
-      (content_features, _) = VGG(x_train, preprocess=True )
+
+      # (content_features, _) = VGG(x_train, preprocess=True )
+      x_train = tf.keras.applications.vgg16.preprocess_input(tf.cast(x_train, tf.float32)*255.)/255.
+      (content_features, _) = VGG(x_train, preprocess=False )
 
       # Content Loss
       MSELoss = tf.keras.losses.MSE
+      content_loss = 0.
       for (y_true, y_pred) in zip(generated_content_features, content_features):
-        content_loss = CONTENT_WEIGHT * MSELoss(y_true, y_pred)            
-        batch_content_loss_sum += content_loss
+        content_loss += tf.reduce_sum(MSELoss(y_true, y_pred))
+      content_loss *= CONTENT_WEIGHT      
 
       # Style Loss
-      style_loss = 0
+      style_loss = 0.
       for (y_true, y_pred)in zip(target_style_gram, generated_style_gram):
-        s_loss = MSELoss(y_true, y_pred)
-        style_loss += s_loss
+        style_loss += MSELoss(y_true, y_pred)
       style_loss *= STYLE_WEIGHT
       batch_style_loss_sum += style_loss
 
@@ -179,11 +199,11 @@ def train():
         # print("Saved TransformerNetwork checkpoint file at {}".format(checkpoint_path))
 
         # Save sample generated image
-        check_img = generated_batch[0,...]
+        check_img = generated_batch[0,...] # 255.
         print( "\tImage, domain:\t({:.1f},{:.1f})".format( tf.reduce_min(check_img).numpy(), tf.reduce_max(check_img).numpy() ) )
-        show(check_img)
-        # # ???: domain=(-1.4763, 508.0564), img is clipped to (0,255) in utils.saveimg
-        
+        rgb_img = tf.image.convert_image_dtype(check_img/255., tf.uint8)
+        show(rgb_img)  # use `rgb_img` for display only, auto clip to 255
+
         # sample_image = utils.ttoi(sample_tensor.clone().detach())
         # sample_image_path = SAVE_IMAGE_PATH + "sample0_" + str(batch_count-1) + ".png"
         # utils.saveimg(sample_image, sample_image_path)
@@ -198,6 +218,17 @@ def train():
       batch_count+=1
 
 
-  return (content_loss_history, style_loss_history, total_loss_history)
+  stop_time = time.time()
+  # Print loss histories
+  print("Done Training the Transformer Network!")
+  print("Training Time: {} seconds".format(stop_time-start_time))
+  print("========Content Loss========")
+  print(content_loss_history) 
+  print("========Style Loss========")
+  print(style_loss_history) 
+  print("========Total Loss========")
+  print(total_loss_history) 
 
-history = train()
+  # Plot Loss Histories
+  if (PLOT_LOSS):
+      utils.plot_loss_hist(content_loss_history, style_loss_history, total_loss_history)
