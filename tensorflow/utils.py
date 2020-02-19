@@ -129,29 +129,46 @@ def torch_transforms(filename):
   # image *= 255. # 255, CHANNELS_LAST 
   return image, label
 
-def batch_torch_transforms(list_ds, batch_size=4):
+def batch_torch_transforms(list_ds, batch_size=None):
   """
   transform a Dataset list of image filenames in to a batch of resized images, labels
   uses torchvision.transforms.Resize() to crop largest square before resize
 
-  WARNING: does NOT lazy load
+  WARNING: does NOT lazy load from Dataset
 
   Args:
-    list_ds: tf.data.Dataset.list_files('{}/*/*'.format(DATASET_PATH))
+    list_ds: 
+      tf.data.Dataset.list_files('{}/*/*'.format(DATASET_PATH)), or
+      next(iter(list_ds.batch(BATCH_SIZE))), batch of string tensors
+
 
   usage:
-    for x_train, y_true in batch_torch_transforms(list_ds, BATCH_SIZE):
+    train_dataset = batch_torch_transforms(list_ds.take(10), BATCH_SIZE) # NOT lazy loaded
+    for filenames in list_ds.batch(BATCH_SIZE):
+      x_train, y_true = batch_torch_transforms(filenames, BATCH_SIZE)
 
   """
-  batch = []
-  for filenames in list_ds.batch(batch_size):
+  def _process_batch(filenames):
     images = []
     labels = []
     for i, filename in enumerate(filenames):
       image, label = torch_transforms(filename)
       images += [image]
       labels += [label]
+      if batch_size is not None and i+1>=batch_size:
+        break
     images = tf.stack(images, axis=0)
     labels = tf.stack(labels, axis=0)
-    batch.append( (images, labels) ) # x_train, y_true
-  return batch
+    return (images, labels)
+
+  if isinstance(list_ds, tf.data.Dataset):
+    if batch_size is not None:
+      list_ds = list_ds.batch(batch_size)
+    batch = []  
+    for filenames in list_ds:
+      batch.append( _process_batch(filenames) ) # x_train, y_true
+    return batch
+
+  if isinstance(list_ds, tf.Tensor):
+    filenames = [f.decode() for f in list_ds.numpy()]
+    return _process_batch(filenames)

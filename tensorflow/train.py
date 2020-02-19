@@ -82,7 +82,7 @@ def train():
   NUM_BATCHES = 100
   list_ds = list_ds.take(BATCH_SIZE * NUM_BATCHES)
   # train_dataset = list_ds.map(transforms).shuffle(buffer_size=100).batch(BATCH_SIZE)
-  train_dataset = utils.batch_torch_transforms(list_ds.shuffle(buffer_size=100), BATCH_SIZE) # NOT lazy loaded
+  # train_dataset = utils.batch_torch_transforms(list_ds.shuffle(buffer_size=100), BATCH_SIZE) # NOT lazy loaded
 
   # # Load networks
   TransformerNetwork = transformer.TransformerNetwork()
@@ -173,7 +173,9 @@ def train():
 
     print("========Epoch {}/{}========".format(epoch+1, NUM_EPOCHS))
     # for content_batch, _ in train_loader:
-    for content_batch, label in train_dataset:
+    # for content_batch, label in train_dataset:
+    for filenames in list_ds.batch(BATCH_SIZE):
+      content_batch, y_true = batch_torch_transforms(filenames)
       # print("{}: batch shape={}".format(batch_count, content_batch.shape))
       # Get current batch size in case of odd batch sizes
       curr_batch_size = content_batch.shape[0]
