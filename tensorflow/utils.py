@@ -143,6 +143,7 @@ def batch_torch_transforms(list_ds, batch_size=4):
     for x_train, y_true in batch_torch_transforms(list_ds, BATCH_SIZE):
 
   """
+  batch = []
   for filenames in list_ds.batch(batch_size):
     images = []
     labels = []
@@ -152,4 +153,5 @@ def batch_torch_transforms(list_ds, batch_size=4):
       labels += [label]
     images = tf.stack(images, axis=0)
     labels = tf.stack(labels, axis=0)
-    return images, labels # x_train, y_true
+    batch.append( (images, labels) ) # x_train, y_true
+  return batch
