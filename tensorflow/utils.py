@@ -33,6 +33,17 @@ def torch_gram(ch_last_array):
   x_t = x.transpose(1, 2)
   return  torch.bmm(x, x_t) / (C*H*W)
 
+def batch_reduce_sum(lossFn, y_true, y_pred, weight=1.0, name=None):
+  losses = tf.zeros(BATCH_SIZE)
+  for a,b in zip(y_true, y_pred):
+    # batch_reduce_sum()
+    # loss = tf.keras.losses.MSE(a,b)
+    loss = lossFn(a,b)
+    loss = tf.reduce_sum(loss, axis=[i for i in range(1,len(loss.shape))] )
+    losses = tf.add(losses, loss)
+  if name is not None: name = "{}_loss".format(name) 
+  return tf.multiply(losses, weight, name=name) # shape=(BATCH_SIZE,)  
+
 
 def vgg_input_preprocess(image, max_dim=512, **kvargs):
   """ apply appropriate VGG preprocessing to image, shape=(?,h,w,c)
@@ -305,3 +316,69 @@ class ImageRecordDatasetFactory():
     NOTE: does NOT work inside tf.data.Dataset.map() because image.getShape() is (None, None, None)
     """
     return random_sq_crop(image, size, margin_pct)
+
+
+class PerceptualLosses_Loss(tf.losses.Loss):
+  name="PerceptualLosses_Loss"
+  reduction=tf.keras.losses.Reduction.AUTO
+  RGB_MEAN_NORMAL_VGG = tf.constant( [0.48501961, 0.45795686, 0.40760392], dtype=tf.float32)
+
+  def __init__(self, loss_network, target_style_gram, loss_weights=None):
+    super(PerceptualLosses_Loss, self).__init__( name=self.name, reduction=self.reduction )
+    self.target_style_gram = target_style_gram # repeated in y_true
+    # print("PerceptualLosses_Loss init()", type(target_style_gram), type(self.target_style_gram))
+    self.VGG = loss_network
+
+  def call(self, y_true, y_pred):
+    # generated_batch = y_pred
+    b,h,w,c = y_pred.shape
+    #???: y_pred.shape=(None, 256,256,3), need batch dim for gram(value)
+    generated_batch = tf.reshape(y_pred, (BATCH_SIZE,h,w,c) )
+
+    # generated_batch: expecting domain=(+-int), mean centered
+    generated_batch = tf.nn.tanh(generated_batch) # domain=(-1.,1.), mean centered
+    
+    # reverse VGG mean_center
+    generated_batch = tf.add( generated_batch, self.RGB_MEAN_NORMAL_VGG) # domain=(0.,1.)
+    generated_batch_BGR_centered = tf.keras.applications.vgg19.preprocess_input(generated_batch*255.)/255.
+    generated_content_features, generated_style_features = self.VGG( generated_batch_BGR_centered, preprocess=False )
+    generated_style_gram = [ gram(value)  for value in generated_style_features ]  # list
+
+    # y_pred = generated_content_features + generated_style_gram
+    # print("PerceptualLosses_Loss: y_pred, output_shapes=", type(y_pred), [v.shape for v in y_pred])
+    # PerceptualLosses_Loss: y_pred, output_shapes= [
+    #   ([4, 16, 16, 512]), ([4, 64, 64]), ([4, 128, 128]), ([4, 256, 256]), ([4, 512, 512]), ([4, 512, 512])
+    # ]
+
+    if tf.is_tensor(y_true):
+      # using: model.fit( x=xx_Dataset, )
+      x_train = y_true
+      x_train_BGR_centered = tf.keras.applications.vgg19.preprocess_input(x_train*255.)/255.
+      target_content_features, _ = self.VGG(x_train_BGR_centered, preprocess=False )
+      # ???: target_content_features[0].shape=(None, None, None, 512), should be shape=(4, 16, 16, 512)
+      target_content_features = [tf.reshape(v, generated_content_features[i].shape) for i,v in enumerate(target_content_features)]
+
+    elif isinstance(y_true, tuple):
+      # using: model.fit( x=xy_true_Dataset, )
+      # WARN: this branch fails with error when used with model.fit():
+      # ValueError: Error when checking model target: the list of Numpy arrays that you are passing to your model is not the size the model expected. 
+      #   Expected to see 1 array(s), for inputs ['output_1'] but instead 
+      #   got the following list of 6 arrays: [
+      #     <tf.Tensor 'args_1:0' shape=(None, 16, 16, 512) dtype=float32>, 
+      #     <tf.Tensor 'args_2:0' shape=(None, 64, 64) dtype=float32>, 
+      #     <tf.Tensor 'args_3:0' shape=(None, 128, 128) dtype=float32>, 
+      #     <tf.Tensor 'arg...
+      # print("detect y_true is tuple(target_content_features + self.target_style_gram)", y_true[0].shape)
+      target_content_features = y_true[:len(generated_content_features)]
+      if self.target_style_gram is None:
+        self.target_style_gram = y_true[len(generated_content_features):]
+    else:
+      assert False, "unexpected result for y_true"
+
+    # losses = tf.keras.losses.MSE(y_true, y_pred)
+    lossFn = tf.keras.losses.MSE
+    c_loss = batch_reduce_sum(lossFn, target_content_features, generated_content_features, CONTENT_WEIGHT, 'content_loss')
+    s_loss = batch_reduce_sum(lossFn, self.target_style_gram, generated_style_gram, STYLE_WEIGHT, 'style_loss')
+    return (c_loss, s_loss)
+
+
