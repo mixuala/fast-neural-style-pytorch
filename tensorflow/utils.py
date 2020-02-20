@@ -85,21 +85,29 @@ def random_sq_crop(image, size=256, margin_pct=5):
 
   NOTE: does NOT work inside tf.data.Dataset.map() because image.getShape() is (None, None, None)
   """
-  scale = 1. + margin_pct/100
   h,w,c = image.shape
   min_dim = np.amin([h,w])
-  crop_size = np.amax([256, min_dim//scale] ).astype(int)
+  if min_dim<=size:
+    crop_size = min_dim
+  else: 
+    scale = 1. + margin_pct/100
+    crop_size = np.amax([ size, min_dim//scale] ).astype(int)
   offset = (np.random.random(size=2) * (min_dim - crop_size)).astype(int)
-  # min_dim = tf.minimum(h,w)
-  # crop_size = tf.maximum(size, tf.cast( tf.cast(min_dim,tf.float32)/scale, tf.int32) )
-  # offset = tf.random.uniform(shape=[2], maxval=(min_dim - crop_size), dtype=tf.int32)
   if w==min_dim: # portrait
     (x,y) = offset[0], offset[1]+((h-crop_size)//2)
   else: # landscape
     (x,y) = offset[0]+((w-crop_size)//2), offset[1]
+
+  if (x+crop_size > w):
+    x -= (x+crop_size) - w
+  
+  if (y+crop_size > h):
+    y -= (y+crop_size) - h
+
   image = tf.image.crop_to_bounding_box( image, y, x, crop_size, crop_size)
   image = tf.image.resize(image, (size,size) )
-  return image
+  return image  
+
 
 # dataset helpers
 def dataset_size(dataset):
@@ -172,3 +180,128 @@ def batch_torch_transforms(list_ds, batch_size=None):
   if isinstance(list_ds, tf.Tensor):
     filenames = [f.decode() for f in list_ds.numpy()]
     return _process_batch(filenames)
+
+
+class ImageRecordDatasetFactory():
+  """
+  https://tensorflow.google.cn/tutorials/load_data/tfrecord#walkthrough_reading_and_writing_image_data
+
+  create a TFRecordDataset of images from folder tree
+
+  usage:
+    # write recordset
+    list_ds = tf.data.Dataset.list_files('{}/*/*'.format(DATASET_PATH)).take(LIMIT)
+    maker = ImageRecordDatasetFactory()
+    recordsetpath = maker.write(recordsetpath, list_ds)
+    print( "file={}, size={}".format(recordsetpath, os.path.getsize(recordsetpath)) )
+
+    # read recordset
+    rec_dataset = tf.data.TFRecordDataset(recordsetpath)
+    image_ds = rec_dataset.map(maker.example_parser(image2tensor=True)).take(10)
+    for d in image_ds:
+      image_tensor = d['image']
+      break
+  """
+  def _int64_feature(self, value):
+    """Returns an int64_list from a bool / enum / int / uint."""
+    return tf.train.Feature(int64_list=tf.train.Int64List(value=[value]))
+  def _bytes_feature(self, value):
+    """Returns a bytes_list from a string / byte."""
+    if isinstance(value, type(tf.constant(0))):
+      value = value.numpy() # BytesList won't unpack a string from an EagerTensor.
+    return tf.train.Feature(bytes_list=tf.train.BytesList(value=[value]))
+  def _float_feature(self, value):
+    """Returns a float_list from a float / double."""
+    return tf.train.Feature(float_list=tf.train.FloatList(value=[value]))
+
+  def image_example(self, image_string, label=b''):
+    """
+    Args:
+      image_string = tf.io.read_file(filename)
+    """
+    image_shape = tf.image.decode_jpeg(image_string).shape
+    label = bytes(label)
+    feature = {
+        'h': self._int64_feature(image_shape[0]),
+        'w': self._int64_feature(image_shape[1]),
+        'c': self._int64_feature(image_shape[2]),
+        'image_raw': self._bytes_feature(image_string),
+        'label': self._bytes_feature(label)
+    }      
+    return tf.train.Example(features=tf.train.Features(feature=feature))
+
+
+  def write(self, savepath, list_ds, label=b'', square=False):
+    """ write a tf.data.TFRecordDataset to the local filesystem
+
+    Args:
+      savepath: path with '.tfrecord' extension
+      list_ds: tf.data.Dataset.list_files(images)
+      label: label='folder' uses dirname as label
+    """
+    if not str(savepath).endswith('.tfrecord'):
+      savepath = '{}.tfrecord'.format(savepath)
+    if not os.path.isdir(os.path.dirname(savepath)):
+      os.mkdir(os.path.dirname(savepath))
+    with tf.io.TFRecordWriter(savepath) as writer:
+      for item in list_ds:
+        if isinstance(item, (tuple, list)):
+          filename, label = item
+        elif label=="folder":
+          filename = item
+          label = os.path.basename(os.path.dirname('./dataset/coco10.tfrecord'))
+        else:
+          filename = item
+        # image_string = open(filename, 'rb').read()
+        image_string = tf.io.read_file(filename)
+
+        # process before write
+        if square:
+          image_string = self.crop_square(image_string)
+
+        tf_example = self.image_example(image_string, label=label)
+        writer.write(tf_example.SerializeToString())
+      return savepath
+
+
+  def example_parser(self, image2tensor=True):
+    image_feature_description = {
+      'h': tf.io.FixedLenFeature([], tf.int64),
+      'w': tf.io.FixedLenFeature([], tf.int64),
+      'c': tf.io.FixedLenFeature([], tf.int64),
+      'image_raw': tf.io.FixedLenFeature([], tf.string),
+      'label': tf.io.FixedLenFeature([], tf.string),
+    }
+    def _parser(example_proto):
+      # Parse the input tf.Example proto using the dictionary above.
+      parsed =  tf.io.parse_single_example(example_proto, image_feature_description)
+      if image2tensor:
+        parsed['image'] = self.image2tensor(parsed['image_raw'])
+        del parsed['image_raw']
+      return parsed
+    return _parser
+
+  @staticmethod
+  def image2tensor(image_raw):
+    # image = tf.image.decode_jpeg(image_raw)
+    image = tf.image.decode_jpeg(image_raw, channels=3)
+    image = tf.image.convert_image_dtype(image, tf.float32)
+    return image
+
+  @staticmethod
+  def crop_square(image_string, size=256):
+    img = ImageRecordDatasetFactory.image2tensor(image_string)
+    img = ImageRecordDatasetFactory.random_sq_crop(img, size)
+    img = tf.image.convert_image_dtype(img, tf.uint8)
+    # print("img.shape", img.shape)
+    return tf.io.encode_jpeg(img, quality=80)
+
+  @staticmethod
+  def random_sq_crop(self, image, size=256, margin_pct=5):
+    """
+    take a square crop from image of size `margin_pct` smaller (e.g. 5% smaller) than the short dimension
+    and randomly offset from center. Resize crop to return a square image of dim=size
+
+    NOTE: does NOT work inside tf.data.Dataset.map() because image.getShape() is (None, None, None)
+    """
+    return random_sq_crop(image, size, margin_pct)
