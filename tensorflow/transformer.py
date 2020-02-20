@@ -29,7 +29,7 @@ class InstanceNorm2D(tf.keras.layers.Layer):
     super(InstanceNorm2D, self).__init__()
   
   # TODO: unit test against `nn.InstanceNorm2d(out_channels, affine=True)`
-  def call(self, input_tensor, training=False):
+  def call(self, input_tensor, training=True):
     batch, rows, cols, channels = input_tensor.shape
     var_shape = [channels]
     mu, sigma_sq = tf.nn.moments(input_tensor, [1,2], keepdims=True)
@@ -64,7 +64,7 @@ class ConvLayer(tf.keras.layers.Layer):
     else:
       self.norm_layer = None
 
-  def call(self, input_tensor, training=False):
+  def call(self, input_tensor, training=True):
     """forward pass"""
     x = input_tensor
     x = self.reflection_padding(x)
@@ -94,7 +94,7 @@ class ResidualLayer(tf.keras.layers.Layer):
     self.conv1 = ConvLayer(f,k,s, norm=norm, activation=None)
     self.conv2 = ConvLayer(f,k,s, norm=norm, activation=None)
 
-  def call(self, input_tensor, training=False):
+  def call(self, input_tensor, training=True):
     """forward pass"""
     x = input_tensor
     x = self.conv1(x)
@@ -132,7 +132,7 @@ class DeconvLayer(tf.keras.layers.Layer):
     else:
       self.norm_layer = None
 
-  def call(self, input_tensor, training=False):
+  def call(self, input_tensor, training=True):
     """forward pass"""
     x = input_tensor
     x = self.upsample(x)
@@ -167,7 +167,7 @@ class TransformerNetwork(tf.keras.Model):
     self.deconv3 = ConvLayer(3, 9, 1, name="deconv_3", norm=None, activation=None)
 
 
-  def call(self, input_tensor, training=False):
+  def call(self, input_tensor, training=True):
     """forward pass"""    
     ### feed_forward one input and get learned learned_image/output from layers
     x = input_tensor
@@ -214,7 +214,7 @@ class TransformerNetworkTanh(TransformerNetwork):
       self.multiplier = tanh_multiplier
 
 
-    def call(self, input_tensor, training=False):
+    def call(self, input_tensor, training=True):
       """forward pass"""
       x = input_tensor
       x = super(TransformerNetworkTanh, self).call(x, training=training)
@@ -226,9 +226,9 @@ class TransformerNetworkTanh(TransformerNetwork):
 
 
 
-# check = TransformerNetwork(name="transformer")
 # check.build(input_shape=(None,255,255,3))
 # check.summary()
+# check = TransformerNetwork(name="transformer")
 # print("***\n")
 # tf.keras.utils.plot_model(check, 'transformer.png', expand_nested=True, show_shapes=True)
 
