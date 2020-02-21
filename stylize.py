@@ -1,10 +1,11 @@
 import torch
-import utils
-import transformer
 import os
 from torchvision import transforms
 import time
 import cv2
+
+import fast_neural_style_pytorch.transformer as transformer
+import fast_neural_style_pytorch.utils as utils
 
 STYLE_TRANSFORM_PATH = "transforms/udnie_aggressive.pth"
 PRESERVE_COLOR = False

@@ -6,9 +6,9 @@ import random
 import numpy as np
 import time
 
-import vgg
-import transformer
-import utils
+import fast_neural_style_pytorch.tensorflow.vgg as vgg
+import fast_neural_style_pytorch.tensorflow.transformer as transformer
+import fast_neural_style_pytorch.tensorflow.utils as utils
 
 # !rm -rf tf_utils
 # !git clone https://github.com/mixuala/tf_utils.git
@@ -57,7 +57,7 @@ def torch_transforms(filename):
 
 def tf_transforms(filename):
   """
-  works with Dataset.map(), but distorts image on resize
+  works with Dataset.map(), but squeezes image to square
   """
   parts = tf.strings.split(filename, '/')
   label = parts[-2]
@@ -105,6 +105,7 @@ def train():
 
   # # Optimizer settings
   optimizer = tf.optimizers.Adam(learning_rate=ADAM_LR, beta_1=0.99, epsilon=1e-1)
+  loss = PerceptualLosses_Loss(VGG, target_style_gram)
 
   # # Loss trackers
   content_loss_history = []
@@ -144,7 +145,9 @@ def train():
       # Style Loss
       style_loss = 0.
       for (y_true, y_pred)in zip(target_style_gram, generated_style_gram):
-        style_loss += MSELoss(y_true, y_pred)
+        # style_loss += MSELoss(y_true, y_pred)
+        curr_batch_size = y_pred.shape[0]
+        style_loss += tf.reduce_sum(MSELoss(y_true[:curr_batch_size], y_pred))
       style_loss *= STYLE_WEIGHT
       batch_style_loss_sum += style_loss
 

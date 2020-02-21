@@ -1,7 +1,8 @@
 import cv2
-import transformer
 import torch
-import utils
+
+import fast_neural_style_pytorch.transformer as transformer
+import fast_neural_style_pytorch.utils as utils
 
 STYLE_TRANSFORM_PATH = "transforms/mosaic.pth"
 PRESERVE_COLOR = False

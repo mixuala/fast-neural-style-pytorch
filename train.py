@@ -6,9 +6,9 @@ import random
 import numpy as np
 import time
 
-import vgg
-import transformer
-import utils
+import fast_neural_style_pytorch.vgg as vgg
+import fast_neural_style_pytorch.transformer as transformer
+import fast_neural_style_pytorch.utils as utils
 
 # GLOBAL SETTINGS
 TRAIN_IMAGE_SIZE = 256
@@ -129,6 +129,8 @@ def train():
 
                 # Save sample generated image
                 sample_tensor = generated_batch[0].clone().detach().unsqueeze(dim=0)
+                # ???: domain=(-1.4763, 508.0564), img is clipped to (0,255) in utils.saveimg
+                print( "\tImage, domain:\t({:.1f},{:.1f})".format( torch.min(sample_tensor).numpy(), torch.max(sample_tensor).numpy() ) )
                 sample_image = utils.ttoi(sample_tensor.clone().detach())
                 sample_image_path = SAVE_IMAGE_PATH + "sample0_" + str(batch_count-1) + ".png"
                 utils.saveimg(sample_image, sample_image_path)

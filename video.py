@@ -1,9 +1,10 @@
 import torch
-import utils
-import transformer
 import cv2
 import os
 from stylize import stylize_folder_single, stylize_folder
+
+import fast_neural_style_pytorch.transformer as transformer
+import fast_neural_style_pytorch.utils as utils
 
 VIDEO_NAME = "dance.mp4"
 FRAME_SAVE_PATH = "frames/"
