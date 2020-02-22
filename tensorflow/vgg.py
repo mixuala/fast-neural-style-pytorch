@@ -1,7 +1,7 @@
 import tensorflow as tf
 import numpy as np
 
-import fast_neural_style_pytorch.tensorflow.utils as utils
+from fast_neural_style_pytorch.tensorflow import utils
 
 def get_layers(model="vgg19"):
   layers = { 

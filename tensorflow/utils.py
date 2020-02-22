@@ -33,7 +33,8 @@ def torch_gram(ch_last_array):
   return  torch.bmm(x, x_t) / (C*H*W)
 
 def batch_reduce_sum(lossFn, y_true, y_pred, weight=1.0, name=None):
-  losses = tf.zeros(BATCH_SIZE)
+  batch_size = y_pred[0].shape[0] if isinstance(y_pred, (tuple,list)) else y_pred.shape[0]
+  losses = tf.zeros(batch_size)
   for a,b in zip(y_true, y_pred):
     # batch_reduce_sum()
     # loss = tf.keras.losses.MSE(a,b)
@@ -41,7 +42,7 @@ def batch_reduce_sum(lossFn, y_true, y_pred, weight=1.0, name=None):
     loss = tf.reduce_sum(loss, axis=[i for i in range(1,len(loss.shape))] )
     losses = tf.add(losses, loss)
   if name is not None: name = "{}_loss".format(name) 
-  return tf.multiply(losses, weight, name=name) # shape=(BATCH_SIZE,)  
+  return tf.multiply(losses, weight, name=name) # shape=(b,)  
 
 
 def vgg_input_preprocess(image, max_dim=512, **kvargs):
@@ -124,7 +125,7 @@ def dataset_size(dataset):
   return dataset.reduce(0, lambda x, _: x + 1).numpy()
 
 
-def torch_transforms(filename):
+def torch_transforms(filename, size=256):
   """
   same as pytorch implementation, but returns CHANNELS_LAST tf.tensor()
   WARN: doesn't work with Dataset.map()  
@@ -140,8 +141,8 @@ def torch_transforms(filename):
       assert False, "error: cannot convert Tensor dtype=string to python string"
     
   pil_image = tf.keras.preprocessing.image.load_img(filename)
-  pil_image = torchvision.transforms.Resize(TRAIN_IMAGE_SIZE)(pil_image)
-  pil_image = torchvision.transforms.CenterCrop(TRAIN_IMAGE_SIZE)(pil_image)
+  pil_image = torchvision.transforms.Resize(size)(pil_image)
+  pil_image = torchvision.transforms.CenterCrop(size)(pil_image)
   image = np.array( torchvision.transforms.ToTensor()(pil_image) ) # CHANNELS_FIRST
   image = tf.transpose(image, perm=[1,2,0]) # normalized, CHANNELS_LAST
   # image *= 255. # 255, CHANNELS_LAST 
@@ -317,22 +318,26 @@ class ImageRecordDatasetFactory():
     return random_sq_crop(image, size, margin_pct)
 
 
-class PerceptualLosses_Loss(tf.losses.Loss):
+class PerceptualLosses_Loss(tf.keras.losses.Loss):
   name="PerceptualLosses_Loss"
   reduction=tf.keras.losses.Reduction.AUTO
   RGB_MEAN_NORMAL_VGG = tf.constant( [0.48501961, 0.45795686, 0.40760392], dtype=tf.float32)
+  batch_size = 4
 
-  def __init__(self, loss_network, target_style_gram, loss_weights=None):
+  def __init__(self, loss_network, target_style_gram, batch_size=4, loss_weights=[1.,1.]):
     super(PerceptualLosses_Loss, self).__init__( name=self.name, reduction=self.reduction )
     self.target_style_gram = target_style_gram # repeated in y_true
     # print("PerceptualLosses_Loss init()", type(target_style_gram), type(self.target_style_gram))
     self.VGG = loss_network
+    self.batch_size = batch_size # hack: y_pred.shape=(None, 256,256,3) when using model.fit()
+    self.CONTENT_WEIGHT = loss_weights[0]
+    self.STYLE_WEIGHT = loss_weights[1]
 
   def call(self, y_true, y_pred):
     # generated_batch = y_pred
     b,h,w,c = y_pred.shape
     #???: y_pred.shape=(None, 256,256,3), need batch dim for gram(value)
-    generated_batch = tf.reshape(y_pred, (BATCH_SIZE,h,w,c) )
+    generated_batch = tf.reshape(y_pred, (self.batch_size,h,w,c) )
 
     # generated_batch: expecting domain=(+-int), mean centered
     generated_batch = tf.nn.tanh(generated_batch) # domain=(-1.,1.), mean centered
@@ -376,8 +381,8 @@ class PerceptualLosses_Loss(tf.losses.Loss):
 
     # losses = tf.keras.losses.MSE(y_true, y_pred)
     lossFn = tf.keras.losses.MSE
-    c_loss = batch_reduce_sum(lossFn, target_content_features, generated_content_features, CONTENT_WEIGHT, 'content_loss')
-    s_loss = batch_reduce_sum(lossFn, self.target_style_gram, generated_style_gram, STYLE_WEIGHT, 'style_loss')
+    c_loss = batch_reduce_sum(lossFn, target_content_features, generated_content_features, self.CONTENT_WEIGHT, name='content_loss')
+    s_loss = batch_reduce_sum(lossFn, self.target_style_gram, generated_style_gram, self.STYLE_WEIGHT, name='style_loss')
     return (c_loss, s_loss)
 
 

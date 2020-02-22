@@ -1,4 +1,3 @@
-%tensorflow_version 2.x
 import tensorflow as tf
 
 import os
@@ -6,9 +5,7 @@ import random
 import numpy as np
 import time
 
-import fast_neural_style_pytorch.tensorflow.vgg as vgg
-import fast_neural_style_pytorch.tensorflow.transformer as transformer
-import fast_neural_style_pytorch.tensorflow.utils as utils
+from fast_neural_style_pytorch.tensorflow import vgg, transformer, utils
 
 # !rm -rf tf_utils
 # !git clone https://github.com/mixuala/tf_utils.git
