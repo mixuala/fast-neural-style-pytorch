@@ -308,7 +308,7 @@ class ImageRecordDatasetFactory():
     return tf.io.encode_jpeg(img, quality=80)
 
   @staticmethod
-  def random_sq_crop(self, image, size=256, margin_pct=5):
+  def random_sq_crop(image, size=256, margin_pct=5):
     """
     take a square crop from image of size `margin_pct` smaller (e.g. 5% smaller) than the short dimension
     and randomly offset from center. Resize crop to return a square image of dim=size
