@@ -1,6 +1,9 @@
 import tensorflow as tf
 import numpy as np
 
+from tensorflow.keras.preprocessing import image
+from tensorflow.keras.models import Model
+
 from fast_neural_style_pytorch.tensorflow import utils
 
 def get_layers(model="vgg19"):
@@ -35,49 +38,82 @@ def get_layers(model="vgg19"):
                 ]
   return layers[model]
 
+def vgg_layers16(content_layers, style_layers, input_shape=(256,256,3)):
+  """ creates a VGG model that returns output values for the given layers
+  see: https://keras.io/applications/#extract-features-from-an-arbitrary-intermediate-layer-with-vgg19
 
-def vgg_layers0(content_layers, style_layers):
-  """ creates a VGG model that returns output values for the given layers   
-
-  Returns: tuple of lists, (content_features, style_features)
+  Returns: 
+    function(x, preprocess=True):
+      Args: 
+        x: image tuple/ndarray h,w,c(RGB), domain=(0.,255.)
+      Returns:
+        a tuple of lists, ([content_features], [style_features])
 
   usage:
-    (content_features, style_features) = vgg_layers0(content_layers, style_layers)(x_train)
+    (content_features, style_features) = vgg_layers16(content_layers, style_layers)(x_train)
   """
-  vgg = tf.keras.applications.VGG19(include_top=False, weights='imagenet')
-  vgg.trainable = False
+  from tensorflow.keras.applications.vgg16 import preprocess_input
+  base_model = tf.keras.applications.VGG16(include_top=False, weights='imagenet', input_shape=input_shape)
+  return vgg_layersXX(content_layers, style_layers, base_model, preprocess_input)
+  
+def vgg_layers19(content_layers, style_layers, input_shape=(256,256,3)):
+  """ creates a VGG model that returns output values for the given layers
+  see: https://keras.io/applications/#extract-features-from-an-arbitrary-intermediate-layer-with-vgg19
+
+  Returns: 
+    function(x, preprocess=True):
+      Args: 
+        x: image tuple/ndarray h,w,c(RGB), domain=(0.,255.)
+      Returns:
+        a tuple of lists, ([content_features], [style_features])
+
+  usage:
+    (content_features, style_features) = vgg_layers16(content_layers, style_layers)(x_train)
+  """
+  from tensorflow.keras.applications.vgg19 import preprocess_input
+  base_model = tf.keras.applications.VGG19(include_top=False, weights='imagenet', input_shape=input_shape)
+  return vgg_layersXX(content_layers, style_layers, base_model, preprocess_input)
+  
+
+def vgg_layersXX(content_layers, style_layers, base_model, preprocessingFn=None):
+  """ creates a VGG model that returns output values for the given layers
+  see: https://keras.io/applications/#extract-features-from-an-arbitrary-intermediate-layer-with-vgg19
+
+  Returns: 
+    function(x, preprocess=True):
+      Args: 
+        x: image tuple/ndarray h,w,c(RGB), domain=(0.,255.)
+      Returns:
+        a tuple of lists, ([content_features], [style_features])
+
+  usage:
+    (content_features, style_features) = vgg_layers16(content_layers, style_layers, base_model, preprocess_input)(x_train)
+  """
+  base_model.trainable = False
   layer_names = content_layers + style_layers
-  content_features = [vgg.get_layer(name).output for name in content_layers]
-  style_features = [vgg.get_layer(name).output for name in style_layers]
+  content_features = [base_model.get_layer(name).output for name in content_layers]
+  style_features = [base_model.get_layer(name).output for name in style_layers]
   output_features = content_features + style_features
 
+  model = Model( inputs=base_model.input, outputs=output_features, name="vgg_layers")
+  model.trainable = False
+
   def _get_features(x, preprocess=True):
-    # ???: preprocess vgg_input, BGR, mean_centered
-    if preprocess:
-      x = utils.vgg_input_preprocess(x)
-    output = tf.keras.Model( inputs=vgg.input, outputs=output_features, name="vgg_layers")(x)
+    """
+    Args:
+      x: expecting tensor, domain=255. hwcRGB
+    """
+    if preprocess and callable(preprocessingFn): 
+      x = preprocessingFn(x)
+    output = model(x) # call as tf.keras.Layer()
     return ( output[:len(content_layers)], output[len(content_layers):] )
 
-  return _get_features
-  
+  return _get_features  
 
-
-def vgg_layers(layer_names):
-  """ creates a VGG model that returns output values for the given layers 
-  Returns: tf.keras.Model()
-  
-  usage:
-    y_pred = vgg_layers(layer_names)(x_train)
-  """
-  vgg = tf.keras.applications.VGG19(include_top=False, weights='imagenet')
-  vgg.trainable = False
-  outputs = [vgg.get_layer(name).output for name in layer_names]
-  model = tf.keras.Model( inputs=vgg.input, outputs=outputs, name="vgg_layers")
-  return model
 
 
 class StyleContentModel(tf.keras.Model):
-  """model that returns style and content tensors for input image
+  """model that returns style and content tensors for input image using VGG19
   
   use to get output tensors for [content, style, transfer] images. cache [content, style] outputs
 
@@ -100,7 +136,7 @@ class StyleContentModel(tf.keras.Model):
     self.content_layers = content_layers
     self.style_layers = style_layers
     self.num_style_layers = len(style_layers)
-    self.vgg = vgg_layers(content_layers + style_layers ) # tf.keras.Model()
+    self.vgg = vgg_layers19(content_layers, style_layers, input_shape=(256,256,3) ) # tf.keras.Layer()
     self.trainable = False
 
 
@@ -108,23 +144,13 @@ class StyleContentModel(tf.keras.Model):
     """model forward pass implementation
 
     Args:
-      inputs: transfer_image, domain=(0.,1.)
+      inputs: transfer_image, hwc(RGB), domain=(0.,255.)
     """
     rank = len(inputs.shape)
     if rank==3: inputs = inputs[tf.newaxis, ...]
-
-    if preprocess or True:
-      # self.style_target = self.vgg_losses(bgr_inputs)[1:] # drop xc
-      vgg_input = vgg_input_preprocess(inputs)
-
-    else:
-      vgg_input = inputs
-
     assert len(vgg_input.shape)==4, "expecting a batch of image, shape=(?,h,w,c), got={}".format(vgg_input.shape)
 
-    vgg_outputs = self.vgg(vgg_input) # tf.keras.Model()
-    split = len(self.content_layers)
-    content_outputs, style_outputs = (vgg_outputs[:split], vgg_outputs[split:])
+    content_outputs, style_outputs = self.vgg(vgg_input, preprocess=preprocess) # tf.keras.Model()
     # apply gram_matrix to style outputs
     style_outputs = [utils.gram(v) for v in style_outputs]
-    return content_outputs + style_outputs  # list()
+    return (content_outputs, style_outputs)  # list()
