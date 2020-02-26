@@ -1,108 +1,81 @@
 import tensorflow as tf
+import tensorflow_addons as tfa
+import numpy as np
 
 import os
 import random
-import numpy as np
 import time
+import PIL.Image as Image
 
-from fast_neural_style_pytorch.tensorflow import vgg, transformer, utils
-
-# !rm -rf tf_utils
 # !git clone https://github.com/mixuala/tf_utils.git
-# from tf_utils import helpers
-# from tf_utils.io import load, show, save
+from tf_utils import helpers
+from tf_utils.io import load, show, save
+
+# !git clone https://github.com/mixuala/fast_neural_style_pytorch.git
+from fast_neural_style_pytorch.tensorflow import transformer, vgg, utils
+import fast_neural_style_pytorch.utils as torch_utils
+
+# paths
+DATASET_PATH = "/content/train"
+RECORD_PATH = '/content/coco2014-sq-1000.tfrecord'
+VGG16_WEIGHTS_TORCH = '/content/vgg16-397923af.pth'
+SAVE_MODEL_PATH = "/content/"
+SAVE_IMAGE_PATH = "/content/"
+STYLE_IMAGE_PATH = "/content/mosaic.jpg"
+
+# !wget -O $STYLE_IMAGE_PATH https://raw.githubusercontent.com/iamRusty/fast-neural-style-pytorch/master/images/mosaic.jpg
+# !wget -O $RECORD_PATH https://query.data.world/s/e7ny5zjv7rdklfhkg4uzaccsejm2s7
+
+
 
 # GLOBAL SETTINGS
 TRAIN_IMAGE_SIZE = 256
-DATASET_PATH = "/content/train"
-NUM_EPOCHS = 1
-NUM_BATCHES = None
-STYLE_IMAGE_PATH = "/content/mosaic.jpg"
+NUM_EPOCHS = 20
+NUM_BATCHES = 250
 BATCH_SIZE = 4 
 CONTENT_WEIGHT = 17
 STYLE_WEIGHT = 50
 TV_WEIGHT = 1e-6 
 ADAM_LR = 0.001
-SAVE_MODEL_PATH = "/content/"
-SAVE_IMAGE_PATH = "/content/"
-# SAVE_MODEL_EVERY = 500 # 2,000 Images with batch size 4
-SAVE_MODEL_EVERY = 10 # 2,000 Images with batch size 4
-SEED = 35
+SAVE_MODEL_EVERY = 500 # 2,000 Images with batch size 4
+SEED = 36
 PLOT_LOSS = 1
 
-# # Dataset and Dataloader
-def transforms(filename):
-  """ resize SMALLEST dim to TRAIN_IMAGE_SIZE, then grab a square center crop
-  """
-  image, label = utils.sq_center_crop(filename, size=TRAIN_IMAGE_SIZE, normalize=True)
-  return image, label
 
-def torch_transforms(filename):
-  """
-  same as pytorch implementation, but returns CHANNELS_LAST tf.tensor()
-  """
-  import torchvision
-  parts = tf.strings.split(filename, '/')
-  label = parts[-2]
-  pil_image = tf.keras.preprocessing.image.load_img(filename)
-  pil_image = torchvision.transforms.Resize(TRAIN_IMAGE_SIZE)(pil_image)
-  pil_image = torchvision.transforms.CenterCrop(TRAIN_IMAGE_SIZE)(pil_image)
-  image = np.array( torchvision.transforms.ToTensor()(pil_image) ) # CHANNELS_FIRST
-  image = tf.transpose(image, perm=[1,2,0]) # normalized, CHANNELS_LAST
-  # image *= 255. # 255, CHANNELS_LAST 
-  return image, label
-
-def tf_transforms(filename):
-  """
-  works with Dataset.map(), but squeezes image to square
-  """
-  parts = tf.strings.split(filename, '/')
-  label = parts[-2]
-  
-  image = tf.io.read_file(filename)
-  image = tf.image.decode_jpeg(image, channels=3) # 255
-  image = tf.image.convert_image_dtype(image, tf.float32)
-  image = tf.image.resize(image, [TRAIN_IMAGE_SIZE, TRAIN_IMAGE_SIZE])
-  return image, label  
-
+xx_Dataset255 = utils.loadDataset(RECORD_PATH)
+stacker = helpers.ImgStacker()
+stacker.clear()
+dbg = {}
 
 def train():
   # # Seeds
-  # torch.manual_seed(SEED)
-  # torch.cuda.manual_seed(SEED)
   np.random.seed(SEED)
   tf.random.set_seed(SEED)
-  random.seed(SEED)
-
-  # # Dataset and Dataloader
-  list_ds = tf.data.Dataset.list_files('{}/*/*'.format(DATASET_PATH))
-  NUM_BATCHES = 100
-  list_ds = list_ds.take(BATCH_SIZE * NUM_BATCHES)
-  # train_dataset = list_ds.map(transforms).shuffle(buffer_size=100).batch(BATCH_SIZE)
-  # train_dataset = utils.batch_torch_transforms(list_ds.shuffle(buffer_size=100), BATCH_SIZE) # NOT lazy loaded
 
   # # Load networks
   TransformerNetwork = transformer.TransformerNetwork()
-  style_model = vgg.get_layers("vgg19_torch")
-  VGG = vgg.vgg_layers0( style_model['content_layers'], style_model['style_layers'] )
+  style_model = vgg.get_layers("vgg16_torch")
+  VGG = vgg.vgg_layers16( style_model['content_layers'], style_model['style_layers'], input_shape=(256,256,3) )
 
-  # # Get Style Features, BGR ordering
-  rgb_mean = tf.reshape(tf.constant( [123.68, 116.779, 103.939], dtype=tf.float32), (1,1,1,3))
-  rgb_mean_normalized = tf.reshape(tf.constant( [0.48501961, 0.45795686, 0.40760392], dtype=tf.float32), (1,1,1,3))
-
-  # style_image is static, cache features
-  style_image = tf.keras.preprocessing.image.load_img(STYLE_IMAGE_PATH)
-  style_image = tf.keras.preprocessing.image.img_to_array(style_image, dtype=float)/255.
+  # style_image can be any size, is static so we can cache features
+  VGG_Target = vgg.vgg_layers16( style_model['content_layers'], style_model['style_layers'], input_shape=None )
+  image_string = tf.io.read_file(STYLE_IMAGE_PATH)
+  style_image = utils.ImageRecordDatasetFactory.image2tensor(image_string)*255.
+  # style_image = utils.ImageRecordDatasetFactory.random_sq_crop(style_image, size=256)*255.
   style_tensor = tf.repeat( style_image[tf.newaxis,...], repeats=BATCH_SIZE, axis=0)
+  show([style_image], w=128, domain=(0.,255.) )
   # B, H, W, C = style_tensor.shape
-  # (_, style_features) = VGG( style_tensor , preprocess=True )
-  style_tensor = tf.keras.applications.vgg16.preprocess_input(tf.cast(style_tensor, tf.float32)*255.)/255.
-  (_, style_features) = VGG( style_tensor , preprocess=False )
+  (_, style_features) = VGG_Target( style_tensor , preprocess=True ) # hwcRGB
   target_style_gram = [ utils.gram(value)  for value in style_features ]  # list
+
+
+  dbg['model'] = TransformerNetwork
+  dbg['vgg'] = VGG
+  dbg['target_style_gram'] = target_style_gram
+
 
   # # Optimizer settings
   optimizer = tf.optimizers.Adam(learning_rate=ADAM_LR, beta_1=0.99, epsilon=1e-1)
-  loss = PerceptualLosses_Loss(VGG, target_style_gram)
 
   # # Loss trackers
   content_loss_history = []
@@ -114,80 +87,91 @@ def train():
 
   # # Optimization/Training Loop
   @tf.function()
-  def train_step(x_train, y_train=None, loss_weights=None, log_freq=10):
+  def train_step(x_train, y_true, target_style_gram, loss_weights=None, log_freq=10):
     with tf.GradientTape() as tape:
       # Generate images and get features
-      # content_batch = content_batch[:,[2,1,0]].to(device) # 
-      generated_batch = TransformerNetwork(x_train)
-      # TODO: clip and/or tanh before VGG()??, what is the domain of generated_batch?
-      generated_batch = tf.add(tf.nn.tanh(generated_batch), rgb_mean_normalized)
-  
-      # (generated_content_features, generated_style_features) = VGG( generated_batch, preprocess=True )
-      generated_batch_BGR_centered = tf.keras.applications.vgg16.preprocess_input(generated_batch*255.)/255.
-      (generated_content_features, generated_style_features) = VGG( generated_batch_BGR_centered, preprocess=False )
+      generated_batch = TransformerNetwork(x_train) # x_train domain=(0,255), hwcRGB
 
+      # # apply scaled tanh
+      # generated_batch = (tf.nn.tanh(generated_batch)+0.5)*255.
+
+      hi = tf.reduce_max(generated_batch)
+      tf.Assert( tf.greater(hi, 1.0),['RGB values should NOT be normalized'])
+      # expecting generated_batch output domain=(0.,255.) for preprocess_input()
+      (generated_content_features, generated_style_features) = VGG( generated_batch, preprocess=True )
       generated_style_gram = [ utils.gram(value)  for value in generated_style_features ]  # list
+      dbg['generated_style_gram'] = generated_style_gram
 
-      # (content_features, _) = VGG(x_train, preprocess=True )
-      x_train = tf.keras.applications.vgg16.preprocess_input(tf.cast(x_train, tf.float32)*255.)/255.
-      (content_features, _) = VGG(x_train, preprocess=False )
+
+      if y_true is None:
+        y_true = x_train
+        assert False, "y_true should not be None with tf.GradientTape"
+
+      if tf.is_tensor(y_true):
+        x_train = y_true # input domain=(0,255)
+        # x_train_BGR_centered = tf.keras.applications.vgg16.preprocess_input(x_train*1.)/1.
+        # x_train = tf.subtract(x_train, rgb_mean)
+        target_content_features, _ = VGG(x_train, preprocess=True ) # hwcRGB
+
+      elif isinstance(y_true, tuple):
+        print("detect y_true is tuple(target_content_features + self.target_style_gram)", y_true[0].shape)
+        target_content_features = y_true[:len(generated_content_features)]
+
+      else:
+        assert False, "unexpected result for y_true"
+
 
       # Content Loss
-      MSELoss = tf.keras.losses.MSE
-      content_loss = 0.
-      for (y_true, y_pred) in zip(generated_content_features, content_features):
-        content_loss += tf.reduce_sum(MSELoss(y_true, y_pred))
-      content_loss *= CONTENT_WEIGHT      
+      # MSELoss = tf.keras.losses.MSE
+      content_loss = utils.get_content_loss(target_content_features, generated_content_features)
+      content_loss *= CONTENT_WEIGHT
 
-      # Style Loss
-      style_loss = 0.
-      for (y_true, y_pred)in zip(target_style_gram, generated_style_gram):
-        # style_loss += MSELoss(y_true, y_pred)
-        curr_batch_size = y_pred.shape[0]
-        style_loss += tf.reduce_sum(MSELoss(y_true[:curr_batch_size], y_pred))
+
+      # # Style Loss
+      style_loss = utils.get_style_loss(target_style_gram, generated_style_gram)
       style_loss *= STYLE_WEIGHT
-      batch_style_loss_sum += style_loss
 
       # Total Loss
       total_loss = content_loss + style_loss
-      batch_total_loss_sum += total_loss  # ???: how do I use this with GradientTape?
-      # end: with tf.GradientTape()
 
-    # apply batch_losses to grads
-    grads = tape.gradient(total_loss, TransformerNetwork.trainable_weights)
-    optimizer.apply_gradients(zip(grads, TransformerNetwork.trainable_weights))
-    return (content_loss, style_loss, generated_batch)
-    # end: train_step()
+      # apply batch_losses to grads
+      grads = tape.gradient(total_loss, TransformerNetwork.trainable_weights)
+      optimizer.apply_gradients(zip(grads, TransformerNetwork.trainable_weights))
+      return (content_loss, style_loss, generated_batch)
+      # end: with tf.GradientTape()
+      # end: train_step()
 
 
   batch_count = 1
   start_time = time.time()
+
   for epoch in range(NUM_EPOCHS):
 
-    if "use loss/current batch" and False:
-      # ???: what do we want? loss/batch or *cumulative* loss/batch?
-      batch_content_loss_sum = 0
-      batch_style_loss_sum = 0
-      batch_total_loss_sum = 0
-      batch_count = 1
+    train_dataset = xx_Dataset255.take(BATCH_SIZE * NUM_BATCHES).batch(BATCH_SIZE)
 
     print("========Epoch {}/{}========".format(epoch+1, NUM_EPOCHS))
-    # for content_batch, _ in train_loader:
-    # for content_batch, label in train_dataset:
-    for filenames in list_ds.batch(BATCH_SIZE):
-      content_batch, y_true = batch_torch_transforms(filenames)
-      # print("{}: batch shape={}".format(batch_count, content_batch.shape))
+    for x_train, y_true in train_dataset:
+      # print("{}: batch shape={}".format(batch_count, x_train.shape))
       # Get current batch size in case of odd batch sizes
-      curr_batch_size = content_batch.shape[0]
+      curr_batch_size = x_train.shape[0]
 
       #   # Backprop and Weight Update
-      (content_loss, style_loss, generated_batch) = train_step(content_batch)
+      (content_loss, style_loss, generated_batch) = train_step(x_train, y_true, target_style_gram) # 255.
+      # print(">>> ",content_loss, style_loss)
+
       batch_content_loss_sum += content_loss
       batch_style_loss_sum += style_loss
       batch_total_loss_sum += (content_loss + style_loss)
 
       # Save Model and Print Losses
       if (((batch_count-1)%SAVE_MODEL_EVERY == 0) or (batch_count==NUM_EPOCHS*NUM_BATCHES)):
+
+        # check side by side
+        [rgb_image0, rgb_image] = [tf.squeeze(tf.clip_by_value(v[0], 0., 255.)) for v in [x_train, generated_batch]]
+        # show([rgb_image0, rgb_image], domain=(0.,255.), w=128)
+        check = stacker.hstack( rgb_image, limit=NUM_EPOCHS, smaller=True )
+        show( check, domain=None )
+
         # Print Losses
         print("========Iteration {}/{}========".format(batch_count, NUM_EPOCHS*NUM_BATCHES))
         print("\tContent Loss:\t{:.2f}".format(batch_content_loss_sum/batch_count))
@@ -195,32 +179,35 @@ def train():
         print("\tTotal Loss:\t{:.2f}".format(batch_total_loss_sum/batch_count))
         print("Time elapsed:\t{} seconds".format(time.time()-start_time))
 
-        # # Save Model
-        # checkpoint_path = SAVE_MODEL_PATH + "checkpoint_" + str(batch_count-1) + ".pth"
-        # torch.save(TransformerNetwork.state_dict(), checkpoint_path)
-        # print("Saved TransformerNetwork checkpoint file at {}".format(checkpoint_path))
+        rgb_image = tf.squeeze(generated_batch[0,...]).numpy() # 255.
+        check = np.stack([np.amin(rgb_image, axis=(0,1)), np.average(rgb_image, axis=(0,1)), np.amax(rgb_image, axis=(0,1))], axis=1)
+        print( "\tImage, (min,mean,max):\t{}".format( check ) )
 
-        # Save sample generated image
-        check_img = generated_batch[0,...] # 255.
-        print( "\tImage, domain:\t({:.1f},{:.1f})".format( tf.reduce_min(check_img).numpy(), tf.reduce_max(check_img).numpy() ) )
-        rgb_img = tf.image.convert_image_dtype(check_img/255., tf.uint8)
-        show(rgb_img)  # use `rgb_img` for display only, auto clip to 255
-
-        # sample_image = utils.ttoi(sample_tensor.clone().detach())
-        # sample_image_path = SAVE_IMAGE_PATH + "sample0_" + str(batch_count-1) + ".png"
-        # utils.saveimg(sample_image, sample_image_path)
-        # print("Saved sample tranformed image at {}".format(sample_image_path))
+        # rgb_batch = tf.image.convert_image_dtype(generated_batch/255., dtype=tf.uint8, saturate=True)
+        generated_batch = tf.clip_by_value(generated_batch, 0.,255.)
+        show(generated_batch, w=128, domain=(0,255))
 
         # Save loss histories
-        content_loss_history.append(batch_total_loss_sum/batch_count)
-        style_loss_history.append(batch_style_loss_sum/batch_count)
-        total_loss_history.append(batch_total_loss_sum/batch_count)
+        content_loss_history.append((batch_total_loss_sum/batch_count).numpy())
+        style_loss_history.append((batch_style_loss_sum/batch_count).numpy())
+        total_loss_history.append((batch_total_loss_sum/batch_count).numpy())
+
+        # Save Model
+        checkpoint_path = SAVE_MODEL_PATH + "tf_checkpoint_" + str(batch_count-1) + ".h5"
+        TransformerNetwork.save_weights(checkpoint_path, save_format='h5')
+        print("Saved tf TransformerNetwork checkpoint file at {}".format(checkpoint_path))
+
+        # Save generated image
+        sample_image_path = SAVE_IMAGE_PATH + "tf_sample_" + str(batch_count-1) + ".png"
+        im=Image.fromarray(np.uint8(stacker.hstack()))
+        im.save(sample_image_path)
+        print("Saved sample tranformed image at {}".format(sample_image_path))
 
       # Iterate Batch Counter
       batch_count+=1
 
-
   stop_time = time.time()
+
   # Print loss histories
   print("Done Training the Transformer Network!")
   print("Training Time: {} seconds".format(stop_time-start_time))
@@ -230,7 +217,8 @@ def train():
   print(style_loss_history) 
   print("========Total Loss========")
   print(total_loss_history) 
-
   # Plot Loss Histories
   if (PLOT_LOSS):
-      utils.plot_loss_hist(content_loss_history, style_loss_history, total_loss_history)
+      torch_utils.plot_loss_hist(content_loss_history, style_loss_history, total_loss_history)
+
+train()

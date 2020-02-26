@@ -386,3 +386,57 @@ class PerceptualLosses_Loss(tf.keras.losses.Loss):
     return (c_loss, s_loss)
 
 
+
+###
+### dataset helpers
+###
+def xyGenerator255(image_ds, limit=None):
+  """ returns (x_train, y_true) = (batch_image, batch_image)
+  images scaled to domain=(0.,255.)
+  """
+  def gen():
+    for d in image_ds:
+      image = d['image']*255.
+      yield (image, image)
+  return gen 
+
+def loadDataset(tfrecord_path):
+  """get dataset of (256,256,3) images from `.tfrecord` file
+
+  Return 
+    (x_train, y_true) tuple of duplicate images
+    images as h,w,c(RGB) domain=(0., 255.)
+  """
+  rec_dataset = tf.data.TFRecordDataset(tfrecord_path)
+  recordsetMaker = ImageRecordDatasetFactory()
+  image_ds = rec_dataset.map(recordsetMaker.example_parser(image2tensor=True))
+  
+  xx_Dataset255 = tf.data.Dataset.from_generator(
+    generator=xyGenerator255(image_ds),
+    output_types=(tf.float32, tf.float32),
+    output_shapes=(
+      (256,256,3), (256,256,3),
+    ),
+  )
+  return xx_Dataset255
+
+
+###
+### loss helpers
+###
+MSELoss = tf.keras.losses.MSE
+def get_content_loss(y_true_content, y_pred_content):
+  content_loss = 0.
+  for (y_true, y_pred) in zip(y_true_content, y_pred_content):
+    batch_size = y_pred.shape[0]
+    # WRONG!!!  content_loss += tf.reduce_sum(MSELoss(y_true[:batch_size], y_pred))/batch_size
+    content_loss += tf.reduce_mean(MSELoss(y_true[:batch_size], y_pred))
+  return content_loss
+
+def get_style_loss(y_true_gram, y_pred_gram):
+  style_loss = 0.
+  for (y_true, y_pred) in zip(y_true_gram, y_pred_gram):
+    batch_size = y_pred.shape[0]
+    # WRONG!!! style_loss += tf.reduce_sum(tf.keras.losses.MSE(y_true[:batch_size], y_pred))/batch_size
+    style_loss += tf.reduce_mean(MSELoss(y_true[:batch_size], y_pred))
+  return style_loss  
