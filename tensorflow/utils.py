@@ -23,8 +23,8 @@ def gram_matrix(array, normalize_magnitude=True):
     gram_matrix /= tf.cast(length *c , tf.float32) 
   return gram_matrix
 
-import torch
 def torch_gram(ch_last_array):
+  import torch
   ch_first_array = tf.transpose(ch_last_array, perm=[0,3,1,2]).numpy()
   tensor = torch.tensor(ch_first_array)
   B, C, H, W = tensor.shape
@@ -319,46 +319,37 @@ class ImageRecordDatasetFactory():
 
 
 class PerceptualLosses_Loss(tf.keras.losses.Loss):
+  """
+  use with class TransformerNetwork
+  """
   name="PerceptualLosses_Loss"
-  reduction=tf.keras.losses.Reduction.AUTO
-  RGB_MEAN_NORMAL_VGG = tf.constant( [0.48501961, 0.45795686, 0.40760392], dtype=tf.float32)
-  batch_size = 4
+  reduction=tf.keras.losses.Reduction.NONE
 
   def __init__(self, loss_network, target_style_gram, batch_size=4, loss_weights=[1.,1.]):
     super(PerceptualLosses_Loss, self).__init__( name=self.name, reduction=self.reduction )
-    self.target_style_gram = target_style_gram # repeated in y_true
-    # print("PerceptualLosses_Loss init()", type(target_style_gram), type(self.target_style_gram))
+    self.target_style_gram = target_style_gram 
     self.VGG = loss_network
     self.batch_size = batch_size # hack: y_pred.shape=(None, 256,256,3) when using model.fit()
     self.CONTENT_WEIGHT = loss_weights[0]
     self.STYLE_WEIGHT = loss_weights[1]
 
   def call(self, y_true, y_pred):
-    # generated_batch = y_pred
+    (generated_batch, x_train) = y_pred
     b,h,w,c = y_pred.shape
     #???: y_pred.shape=(None, 256,256,3), need batch dim for gram(value)
     generated_batch = tf.reshape(y_pred, (self.batch_size,h,w,c) )
 
-    # generated_batch: expecting domain=(+-int), mean centered
-    generated_batch = tf.nn.tanh(generated_batch) # domain=(-1.,1.), mean centered
-    
-    # reverse VGG mean_center
-    generated_batch = tf.add( generated_batch, self.RGB_MEAN_NORMAL_VGG) # domain=(0.,1.)
-    generated_batch_BGR_centered = tf.keras.applications.vgg19.preprocess_input(generated_batch*255.)/255.
-    generated_content_features, generated_style_features = self.VGG( generated_batch_BGR_centered, preprocess=False )
-    generated_style_gram = [ gram(value)  for value in generated_style_features ]  # list
+    # # generated_batch: expecting domain=(255.)
+    # generated_batch = tf.nn.tanh(generated_batch)*255. # domain=(-255,255.),
+    # generated_batch = tf.clip_by_value(generated_batch, 0.,255.) # domain=(0.,255.)
 
-    # y_pred = generated_content_features + generated_style_gram
-    # print("PerceptualLosses_Loss: y_pred, output_shapes=", type(y_pred), [v.shape for v in y_pred])
-    # PerceptualLosses_Loss: y_pred, output_shapes= [
-    #   ([4, 16, 16, 512]), ([4, 64, 64]), ([4, 128, 128]), ([4, 256, 256]), ([4, 512, 512]), ([4, 512, 512])
-    # ]
+    generated_content_features, generated_style_features = self.VGG( generated_batch, preprocess=True )
+    generated_style_gram = [ fnstf.utils.gram(value)  for value in generated_style_features ]  # list
 
     if tf.is_tensor(y_true):
-      # using: model.fit( x=xx_Dataset, )
       x_train = y_true
-      x_train_BGR_centered = tf.keras.applications.vgg19.preprocess_input(x_train*255.)/255.
-      target_content_features, _ = self.VGG(x_train_BGR_centered, preprocess=False )
+      # using: model.fit( x=xx_Dataset, ) with x_train
+      target_content_features, _ = self.VGG(x_train, preprocess=True )
       # ???: target_content_features[0].shape=(None, None, None, 512), should be shape=(4, 16, 16, 512)
       target_content_features = [tf.reshape(v, generated_content_features[i].shape) for i,v in enumerate(target_content_features)]
 
@@ -379,11 +370,18 @@ class PerceptualLosses_Loss(tf.keras.losses.Loss):
     else:
       assert False, "unexpected result for y_true"
 
-    # losses = tf.keras.losses.MSE(y_true, y_pred)
-    lossFn = tf.keras.losses.MSE
-    c_loss = batch_reduce_sum(lossFn, target_content_features, generated_content_features, self.CONTENT_WEIGHT, name='content_loss')
-    s_loss = batch_reduce_sum(lossFn, self.target_style_gram, generated_style_gram, self.STYLE_WEIGHT, name='style_loss')
-    return (c_loss, s_loss)
+    # Content Loss
+    # MSELoss = tf.keras.losses.MSE
+    content_loss = get_content_loss(target_content_features, generated_content_features)
+    content_loss *= self.CONTENT_WEIGHT
+
+    # # Style Loss
+    style_loss = get_style_loss(self.target_style_gram, generated_style_gram)
+    style_loss *= self.STYLE_WEIGHT
+
+    total_loss = content_loss + style_loss
+
+    return (content_loss, style_loss, total_loss)
 
 
 

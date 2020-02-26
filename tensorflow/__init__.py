@@ -1,4 +1,4 @@
 from fast_neural_style_pytorch.tensorflow import utils
 from fast_neural_style_pytorch.tensorflow import vgg
 from fast_neural_style_pytorch.tensorflow import transformer
-from fast_neural_style_pytorch.tensorflow import train
+# from fast_neural_style_pytorch.tensorflow import train
