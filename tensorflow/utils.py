@@ -7,10 +7,12 @@ def gram(tensor):
   """
   same as torch gram(), but uses CHANNELS_LAST format
   tested OK vs torch_gram()
+  works with tensorflow graph, dataset.map()
   """
-  B, H, W, C = tensor.shape
-  x = tf.reshape( tensor, (B, -1, C) )
-  return  tf.matmul(x, x, transpose_a=True) / (C*H*W)
+  # B, H, W, C = tensor.shape
+  shape = tf.shape(tensor)
+  x = tf.reshape( tensor, (shape[0], -1, shape[3]) )
+  return  tf.matmul(x, x, transpose_a=True) / tf.cast(tf.reduce_prod(shape[1:]), tf.float32)
 
 def gram_matrix(array, normalize_magnitude=True):
   (b,*_,c) = array.shape
