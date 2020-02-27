@@ -317,7 +317,7 @@ class ImageRecordDatasetFactory():
     return tf.train.Example(features=tf.train.Features(feature=feature))
 
   @staticmethod
-  def write(self, savepath, list_ds, label=b'', square=False):
+  def write(savepath, list_ds, label=b'', square=False):
     """
     Args:
       savepath: path with '.tfrecord' extension
@@ -456,7 +456,7 @@ def loadDataset(tfrecord_path, square=False):
   rec_dataset = tf.data.TFRecordDataset(tfrecord_path)
   image_ds = rec_dataset.map(ImageRecordDatasetFactory.example_parser(image2tensor=True))
   if square:
-    image_ds = image_ds.map(ImageRecordDatasetFactory.)
+    image_ds = image_ds.map(ImageRecordDatasetFactory.random_sq_crop)
   
   xx_Dataset255 = tf.data.Dataset.from_generator(
     generator=xyGenerator255(image_ds),
