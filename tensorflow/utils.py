@@ -359,7 +359,7 @@ class ImageRecordDatasetFactory():
     """
     img = ImageRecordDatasetFactory.image2tensor(image_string)
     img = ImageRecordDatasetFactory.random_sq_crop(img, size)
-    img = tf.image.convert_image_dtype(img, tf.uint8)
+    img = tf.cast(img, tf.uint8)
     return tf.io.encode_jpeg(img, quality=80)      
 
 
