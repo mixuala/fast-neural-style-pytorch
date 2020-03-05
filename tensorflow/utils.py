@@ -448,7 +448,7 @@ def xyGenerator255(image_ds, limit=None):
     for d in image_ds:
       image = d['image']*255.
       yield (image, image)
-  return gen 
+  return gen
 
 
 
@@ -478,18 +478,90 @@ def loadDataset(tfrecord_path, square=False):
 ### loss helpers
 ###
 MSELoss = tf.keras.losses.MSE
-def get_content_loss(y_true_content, y_pred_content):
-  content_loss = 0.
-  for (y_true, y_pred) in zip(y_true_content, y_pred_content):
+def get_SUM_mse_loss(y_true, y_pred, weights=None):
+  if isinstance(y_pred, (tuple, list)):
+    if weights is not None:
+      assert len(weights)==len(y_pred), "weights do not match"
+      losses = [ get_SUM_mse_loss(y_true, y_pred, w) for (y_true, y_pred, w) in zip(y_true, y_pred, weights) ]
+    else:
+      losses = [ get_SUM_mse_loss(y_true, y_pred, None) for (y_true, y_pred) in zip(y_true, y_pred) ]
+    return tf.reduce_sum(losses)
+  if tf.is_tensor(y_pred):
     batch_size = y_pred.shape[0]
-    # WRONG!!!  content_loss += tf.reduce_sum(MSELoss(y_true[:batch_size], y_pred))/batch_size
-    content_loss += tf.reduce_mean(MSELoss(y_true[:batch_size], y_pred))
-  return content_loss
+    weights = weights or 1.
+    return tf.reduce_mean(MSELoss(y_true[:batch_size], y_pred)) * weights
+  assert False, "unexpected input"
+
+# verified OK with UNIT_TEST.BATCH_xyGenerator_y_true_as_TWOS_and_weights()
+def get_MEAN_mse_loss(y_true, y_pred, weights=None):
+  if isinstance(y_pred, (tuple, list)):
+    if weights is not None:
+      assert len(weights)==len(y_pred), "weights do not match"
+      losses = [ get_MEAN_mse_loss(y_true, y_pred, w) for (y_true, y_pred, w) in zip(y_true, y_pred, weights) ]
+    else:
+      losses = [ get_MEAN_mse_loss(y_true, y_pred, None) for (y_true, y_pred) in zip(y_true, y_pred) ]
+    return tf.reduce_mean(losses)
+  if tf.is_tensor(y_pred):
+    batch_size = y_pred.shape[0]
+    weights = weights or 1.
+    return tf.reduce_mean(MSELoss(y_true[:batch_size], y_pred)) * weights
+  assert False, "unexpected input"
+
+
+def get_content_loss(y_true_content, y_pred_content):
+  return get_SUM_mse_loss(y_true_content, y_pred_content)
 
 def get_style_loss(y_true_gram, y_pred_gram):
-  style_loss = 0.
-  for (y_true, y_pred) in zip(y_true_gram, y_pred_gram):
-    batch_size = y_pred.shape[0]
-    # WRONG!!! style_loss += tf.reduce_sum(tf.keras.losses.MSE(y_true[:batch_size], y_pred))/batch_size
-    style_loss += tf.reduce_mean(MSELoss(y_true[:batch_size], y_pred))
-  return style_loss  
+  # NOTE: style_losses use reduce_SUM() NOT reduce_MEAN() to accumulate a list of gram losses
+  return get_SUM_mse_loss(y_true_content, y_pred_content)
+
+
+
+def get_normalized_weights_from_loss_history(history, step=-1):
+  """ get normalized loss weights from a training run with no loss weights
+    history = model.fit() with no loss weights
+  """
+  if hasattr(history, 'history'): history = history.history
+  assert isinstance(history, dict), "ERROR: expecting history.history as dict of losses"
+
+  losses = np.asarray([v for k,v in history.items()])
+  step_losses = losses[:,-1]
+  total_loss = np.sum(step_losses)
+  loss_weights = total_loss/step_losses
+  np.set_printoptions(precision=2, suppress=True) # don't use scientific notation
+  print("step={}, losses={}".format(losses.shape[1],  step_losses))
+  print("normalized weights:", loss_weights)
+  return loss_weights
+
+
+class HistoryCallback():
+  """ emulate history = model.fit() output 
+  usage: 
+    history = HistoryCallback()
+    losses = history.history()
+  """
+  _batches = [] 
+  _history = [] 
+  def on_batch_end(self, batch, losses, logs=None):
+    self._batches.append(losses)
+    return len(self._batches)
+
+  def on_epoch_end(self, epoch, logs=None):
+    batch_losses = tf.convert_to_tensor(self._batches) # shape=(NUM_BATCHES,6)
+    # epoch_losses = tf.reduce_sum(batch_losses, axis=0) # shape=(1,6)
+    epoch_losses = tf.reduce_mean(batch_losses, axis=0) # shape=(1,6)
+    self._history.append( epoch_losses )
+    self._batches=[]
+    return epoch_losses
+
+  def history(self, as_dict=False, prefix="loss"):
+    losses = tf.convert_to_tensor(self._history) # shape=(NUM_EPOCHS,6)
+    if not as_dict: return losses
+
+    # format as dict
+    result = {}
+    rows, cols = losses.shape
+    for c in range(cols):
+      key = "{}_{}".format(prefix, c)
+      result[key] = losses[:,c]
+    return result

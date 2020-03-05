@@ -2,6 +2,10 @@ import tensorflow as tf
 import numpy as np
 
 
+from fast_neural_style_pytorch.tensorflow import vgg
+from fast_neural_style_pytorch.tensorflow import utils
+
+
 class ReflectionPadding2D(tf.keras.layers.Layer):
   """
   usage: 
@@ -283,3 +287,41 @@ def getTransformerNetworkFn(shape=tuple, norm="instance", **kwargs):
   x = tf.nn.relu(x)
   x = _layers.deconv3(x)
   return tf.keras.Model(input_tensor, x)
+
+
+
+class TransformerNetwork_VGG(tf.keras.Model):
+  def __init__(self, style_image, **kwargs):
+    super(TransformerNetwork_VGG, self).__init__(**kwargs)
+
+    transformerNetwork = TransformerNetwork()
+    transformerNetwork.trainable = True
+    style_model = vgg.get_layers("vgg19")
+    VGG = vgg.vgg_layers19( style_model['content_layers'], style_model['style_layers'] )
+
+    if tf.is_tensor(style_image) and style_image.shape==(256,256,3):
+      VGGfeatures = vgg.VGG_Features(VGG, style_image=style_image)
+    else: 
+      target_style_gram = TransformerNetwork_VGG._get_target_style_gram_from_image(style_image, style_model)
+      VGGfeatures = vgg.VGG_Features(VGG, target_style_gram=target_style_gram)
+    
+    self.transformer = transformerNetwork
+    self.vgg = VGGfeatures
+
+  def call(self, inputs):
+    x = inputs
+    x = self.transformer(x)
+    x = self.vgg(x)
+    return x
+
+  @staticmethod
+  def _get_target_style_gram_from_image(style_image, style_model):
+    """"use when style_image.shape != (256,256,3)"""
+    VGG_Target = vgg.vgg_layers19( style_model['content_layers'], style_model['style_layers'], input_shape=None )
+    if isinstance(style_image,str):
+      image_string = tf.io.read_file(style_image)
+      style_image = utils.ImageRecordDatasetFactory.image2tensor(image_string, normalize=False)
+    target_style_gram = vgg.VGG_Features.get_style_gram(VGG_Target, style_image)
+    show([style_image], labels=["style_image, shape={}".format(style_image.shape)], w=128, domain=(0.,255.) )
+    return target_style_gram
+
