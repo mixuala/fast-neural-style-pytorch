@@ -171,14 +171,13 @@ class VGG_Features():
     self.batch_size = batch_size
     self.target_style_gram = [ tf.repeat( gram[:1], repeats=batch_size, axis=0) for gram in self.target_style_gram]
 
-
-  def get_style_gram(self, style_image, target_style_gram=None):
-    batch_size = self.batch_size
+  @staticmethod
+  def get_style_gram(vggFeaturesModel, style_image, batch_size=4):
     style_batch = tf.repeat( style_image[tf.newaxis,...], repeats=batch_size, axis=0)
     # show([style_image], w=128, domain=(0.,255.) )
 
     # B, H, W, C = style_batch.shape
-    (_, style_features) = self.loss_model( style_batch , preprocess=True ) # hwcRGB
+    (_, style_features) = vggFeaturesModel( style_batch , preprocess=True ) # hwcRGB
     target_style_gram = [ utils.gram(value)  for value in style_features ]  # list
     return target_style_gram  
 

@@ -291,7 +291,7 @@ def getTransformerNetworkFn(shape=tuple, norm="instance", **kwargs):
 
 
 class TransformerNetwork_VGG(tf.keras.Model):
-  def __init__(self, style_image, **kwargs):
+  def __init__(self, style_image, batch_size=4, **kwargs):
     super(TransformerNetwork_VGG, self).__init__(**kwargs)
 
     transformerNetwork = TransformerNetwork()
@@ -300,10 +300,10 @@ class TransformerNetwork_VGG(tf.keras.Model):
     VGG = vgg.vgg_layers19( style_model['content_layers'], style_model['style_layers'] )
 
     if tf.is_tensor(style_image) and style_image.shape==(256,256,3):
-      VGGfeatures = vgg.VGG_Features(VGG, style_image=style_image)
+      VGGfeatures = vgg.VGG_Features(VGG, style_image=style_image, batch_size=batch_size)
     else: 
-      target_style_gram = TransformerNetwork_VGG._get_target_style_gram_from_image(style_image, style_model)
-      VGGfeatures = vgg.VGG_Features(VGG, target_style_gram=target_style_gram)
+      target_style_gram = TransformerNetwork_VGG._get_target_style_gram_from_image(style_image, style_model, batch_size=batch_size )
+      VGGfeatures = vgg.VGG_Features(VGG, target_style_gram=target_style_gram, batch_size=batch_size)
     
     self.transformer = transformerNetwork
     self.vgg = VGGfeatures
@@ -315,13 +315,13 @@ class TransformerNetwork_VGG(tf.keras.Model):
     return x
 
   @staticmethod
-  def _get_target_style_gram_from_image(style_image, style_model):
+  def _get_target_style_gram_from_image(style_image, style_model, batch_size=4):
     """"use when style_image.shape != (256,256,3)"""
     VGG_Target = vgg.vgg_layers19( style_model['content_layers'], style_model['style_layers'], input_shape=None )
     if isinstance(style_image,str):
       image_string = tf.io.read_file(style_image)
       style_image = utils.ImageRecordDatasetFactory.image2tensor(image_string, normalize=False)
-    target_style_gram = vgg.VGG_Features.get_style_gram(VGG_Target, style_image)
+    target_style_gram = vgg.VGG_Features.get_style_gram(VGG_Target, style_image, batch_size=batch_size)
     show([style_image], labels=["style_image, shape={}".format(style_image.shape)], w=128, domain=(0.,255.) )
     return target_style_gram
 
