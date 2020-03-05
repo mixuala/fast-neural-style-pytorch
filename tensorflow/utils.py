@@ -336,7 +336,7 @@ class ImageRecordDatasetFactory():
           filename, label = item
         elif label=="folder":
           filename = item
-          label = os.path.basename(os.path.dirname('./dataset/coco10.tfrecord'))
+          label = os.path.basename(os.path.dirname(str(filename)))
         else:
           filename = item
         image_string = tf.io.read_file(filename)
@@ -441,12 +441,16 @@ class ImageRecordDatasetFactory():
 def xyGenerator255(image_ds, limit=None):
   """ returns (x_train, y_true) = (batch_image, batch_image)
   images scaled to domain=(0.,255.)
+
+  see also: vgg.VGG_Features().get_dataset()
   """
   def gen():
     for d in image_ds:
       image = d['image']*255.
       yield (image, image)
   return gen 
+
+
 
 def loadDataset(tfrecord_path, square=False):
   """get dataset of (256,256,3) images from `.tfrecord` file
