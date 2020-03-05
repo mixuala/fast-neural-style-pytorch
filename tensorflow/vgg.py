@@ -54,7 +54,7 @@ def vgg_layers16(content_layers, style_layers, input_shape=(256,256,3)):
   """
   from tensorflow.keras.applications.vgg16 import preprocess_input
   base_model = tf.keras.applications.VGG16(include_top=False, weights='imagenet', input_shape=input_shape)
-  return vgg_layersXX(content_layers, style_layers, base_model, preprocess_input)
+  return VGG_Model(content_layers, style_layers, base_model, preprocessingFn=preprocess_input)
   
 def vgg_layers19(content_layers, style_layers, input_shape=(256,256,3)):
   """ creates a VGG model that returns output values for the given layers
@@ -72,15 +72,15 @@ def vgg_layers19(content_layers, style_layers, input_shape=(256,256,3)):
   """
   from tensorflow.keras.applications.vgg19 import preprocess_input
   base_model = tf.keras.applications.VGG19(include_top=False, weights='imagenet', input_shape=input_shape)
-  return vgg_layersXX(content_layers, style_layers, base_model, preprocess_input)
-  
+  return VGG_Model(content_layers, style_layers, base_model, preprocessingFn=preprocess_input)
 
-def vgg_layersXX(content_layers, style_layers, base_model, preprocessingFn=None):
+
+class VGG_Model(tf.keras.models.Model):
   """ creates a VGG model that returns output values for the given layers
   see: https://keras.io/applications/#extract-features-from-an-arbitrary-intermediate-layer-with-vgg19
 
   Returns: 
-    function(x, preprocess=True):
+    keras.models.Model(x, preprocess=True):
       Args: 
         x: image tuple/ndarray h,w,c(RGB), domain=(0.,255.)
       Returns:
@@ -88,27 +88,25 @@ def vgg_layersXX(content_layers, style_layers, base_model, preprocessingFn=None)
 
   usage:
     (content_features, style_features) = vgg_layers16(content_layers, style_layers, base_model, preprocess_input)(x_train)
-  """
-  base_model.trainable = False
-  layer_names = content_layers + style_layers
-  content_features = [base_model.get_layer(name).output for name in content_layers]
-  style_features = [base_model.get_layer(name).output for name in style_layers]
-  output_features = content_features + style_features
+  """  
+  def __init__(self, content_layers, style_layers, base_model, preprocessingFn=None, **kwargs):
+    super(VGG_Model, self).__init__(**kwargs)
+    self.layer_names = content_layers + style_layers
+    self.content_layer_split = len(content_layers)
+    self.preprocessingFn = preprocessingFn
+    base_model.trainable = False
+    content_features = [base_model.get_layer(name).output for name in content_layers]
+    style_features = [base_model.get_layer(name).output for name in style_layers]
+    output_features = content_features + style_features
+    self.model = Model( inputs=base_model.input, outputs=output_features, name="vgg_layers")
+    self.model.trainable = False
 
-  model = Model( inputs=base_model.input, outputs=output_features, name="vgg_layers")
-  model.trainable = False
+  def call(self, x, preprocess=True):
+    if preprocess and callable(self.preprocessingFn): 
+      x = self.preprocessingFn(x)
+    output = self.model(x) # call as tf.keras.Layer()
+    return ( output[:self.content_layer_split], output[self.content_layer_split:] )
 
-  def _get_features(x, preprocess=True):
-    """
-    Args:
-      x: expecting tensor, domain=255. hwcRGB
-    """
-    if preprocess and callable(preprocessingFn): 
-      x = preprocessingFn(x)
-    output = model(x) # call as tf.keras.Layer()
-    return ( output[:len(content_layers)], output[len(content_layers):] )
-
-  return _get_features  
 
 
 
