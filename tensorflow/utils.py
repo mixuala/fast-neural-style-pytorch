@@ -534,28 +534,49 @@ def get_normalized_weights_from_loss_history(history, step=-1):
   return loss_weights
 
 
-class HistoryCallback():
+class HistoryCallback(tf.keras.callbacks.Callback):
   """ emulate history = model.fit() output 
   usage: 
     history = HistoryCallback()
     losses = history.history()
   """
-  _batches = [] 
-  _history = [] 
-  def on_batch_end(self, batch, losses, logs=None):
+  def __init__(self):
+    super(HistoryCallback, self).__init__()
+    self._batches = [] 
+    self._history = []
+
+  def on_batch_end(self, batch, logs=None, losses=None):
+    if losses is None and logs is not None:
+      # logs: 
+      #   batch <class 'int'>
+      #   size <class 'numpy.int64'>
+      #   loss <class 'numpy.float32'>
+      #   output_1_loss <class 'numpy.float32'>
+      #   output_2_loss <class 'numpy.float32'>
+      #   output_3_loss <class 'numpy.float32'>
+      #   output_4_loss <class 'numpy.float32'>
+      #   output_5_loss <class 'numpy.float32'>
+      #   output_6_loss <class 'numpy.float32'>
+      keys = ['output_{}_loss'.format(i) for i in range(1,7)]
+      losses = tuple(logs[k] for k in keys)
+
+    assert len(losses)==6, "expecting 6 loss values, got {}".format(losses)
     self._batches.append(losses)
     return len(self._batches)
 
   def on_epoch_end(self, epoch, logs=None):
     batch_losses = tf.convert_to_tensor(self._batches) # shape=(NUM_BATCHES,6)
-    # epoch_losses = tf.reduce_sum(batch_losses, axis=0) # shape=(1,6)
     epoch_losses = tf.reduce_mean(batch_losses, axis=0) # shape=(1,6)
+    # ???: epoch_losses /=BATCH_SIZE 
     self._history.append( epoch_losses )
     self._batches=[]
     return epoch_losses
 
   def history(self, as_dict=False, prefix="loss"):
-    losses = tf.convert_to_tensor(self._history) # shape=(NUM_EPOCHS,6)
+    if len(self._history)==0:
+      losses = tf.convert_to_tensor(self._batches) # shape=(NUM_BATCHES,6)
+    else:
+      losses = tf.convert_to_tensor(self._history) # shape=(NUM_EPOCHS,6)
     if not as_dict: return losses
 
     # format as dict
