@@ -513,7 +513,7 @@ def get_content_loss(y_true_content, y_pred_content):
 
 def get_style_loss(y_true_gram, y_pred_gram):
   # NOTE: style_losses use reduce_SUM() NOT reduce_MEAN() to accumulate a list of gram losses
-  return get_SUM_mse_loss(y_true_gram, y_pred_gram))
+  return get_SUM_mse_loss(y_true_gram, y_pred_gram)
 
 
 
