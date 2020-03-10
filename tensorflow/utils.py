@@ -478,14 +478,14 @@ def loadDataset(tfrecord_path, square=False):
 ### loss helpers
 ###
 MSELoss = tf.keras.losses.MSE
-def get_SUM_mse_loss(y_true, y_pred, weights=None):
+def get_SUM_mse_loss(y_true, y_pred, weights=None, reduce=True):
   if isinstance(y_pred, (tuple, list)):
     if weights is not None:
       assert len(weights)==len(y_pred), "weights do not match"
       losses = [ get_SUM_mse_loss(y_true, y_pred, w) for (y_true, y_pred, w) in zip(y_true, y_pred, weights) ]
     else:
       losses = [ get_SUM_mse_loss(y_true, y_pred, None) for (y_true, y_pred) in zip(y_true, y_pred) ]
-    return tf.reduce_sum(losses)
+    return tf.reduce_sum(losses) if reduce else tuple(losses)
   if tf.is_tensor(y_pred):
     batch_size = y_pred.shape[0]
     weights = weights or 1.
@@ -493,14 +493,14 @@ def get_SUM_mse_loss(y_true, y_pred, weights=None):
   assert False, "unexpected input"
 
 # verified OK with UNIT_TEST.BATCH_xyGenerator_y_true_as_TWOS_and_weights()
-def get_MEAN_mse_loss(y_true, y_pred, weights=None):
+def get_MEAN_mse_loss(y_true, y_pred, weights=None, reduce=True):
   if isinstance(y_pred, (tuple, list)):
     if weights is not None:
       assert len(weights)==len(y_pred), "weights do not match"
       losses = [ get_MEAN_mse_loss(y_true, y_pred, w) for (y_true, y_pred, w) in zip(y_true, y_pred, weights) ]
     else:
       losses = [ get_MEAN_mse_loss(y_true, y_pred, None) for (y_true, y_pred) in zip(y_true, y_pred) ]
-    return tf.reduce_mean(losses)
+    return tf.reduce_mean(losses) if reduce else tuple(losses)
   if tf.is_tensor(y_pred):
     batch_size = y_pred.shape[0]
     weights = weights or 1.
@@ -513,7 +513,7 @@ def get_content_loss(y_true_content, y_pred_content):
 
 def get_style_loss(y_true_gram, y_pred_gram):
   # NOTE: style_losses use reduce_SUM() NOT reduce_MEAN() to accumulate a list of gram losses
-  return get_SUM_mse_loss(y_true_content, y_pred_content)
+  return get_SUM_mse_loss(y_true_gram, y_pred_gram))
 
 
 
