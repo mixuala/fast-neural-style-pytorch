@@ -305,9 +305,13 @@ class TransformerNetwork_VGG(tf.keras.Model):
       target_style_gram = TransformerNetwork_VGG._get_target_style_gram_from_image(style_image, style_model, batch_size=batch_size )
       VGGfeatures = vgg.VGG_Features(VGG, target_style_gram=target_style_gram, batch_size=batch_size)
       VGGfeatures.style_image = style_image
-    
+
     self.transformer = transformerNetwork
     self.vgg = VGGfeatures
+    self.use_normalized_inputs = tf.reduce_max(VGGfeatures.style_image) <= 1.0
+    domain_max = 1 if self.use_normalized_inputs else 255
+    print(">>> TransformerNetwork_VGG: target_style_gram for input tensors with domain=(0,{})".format(domain_max) )
+    # end
 
   def call(self, inputs):
     x = inputs
