@@ -525,7 +525,7 @@ def get_normalized_weights_from_loss_history(history, step=-1):
   assert isinstance(history, dict), "ERROR: expecting history.history as dict of losses"
 
   losses = np.asarray([v for k,v in history.items()])
-  step_losses = losses[:,-1]
+  step_losses = losses[-6:,-1]          # ignore total loss if present
   total_loss = np.sum(step_losses)
   loss_weights = total_loss/step_losses
   np.set_printoptions(precision=2, suppress=True) # don't use scientific notation
